@@ -10,7 +10,7 @@ import {
   defaultFromSide,
   defaultToSide,
   chosenSide,
-  polylinePath,
+  roundedPath,
   labelPoint,
   componentFill,
   componentText,
@@ -60,6 +60,92 @@ function measureNode(node) {
 }
 
 const nodes = new Map(asArray(dataflow.nodes).map((node) => [node.id, measureNode(node)]));
+const EPSILON = 0.001;
+const ROUTE_OVERLAP_MIN = 10;
+
+function formatPoint([x, y]) {
+  return `${Math.round(x)},${Math.round(y)}`;
+}
+
+function pointsEqual(a, b) {
+  return Math.abs(a[0] - b[0]) < EPSILON && Math.abs(a[1] - b[1]) < EPSILON;
+}
+
+function isAxisAligned(a, b) {
+  return Math.abs(a[0] - b[0]) < EPSILON || Math.abs(a[1] - b[1]) < EPSILON;
+}
+
+function segmentsFor(flow) {
+  const routed = pathFor(flow);
+  const segments = [];
+  for (let i = 0; i < routed.points.length - 1; i += 1) {
+    const start = routed.points[i];
+    const end = routed.points[i + 1];
+    if (!pointsEqual(start, end)) {
+      segments.push({ flow, start, end });
+    }
+  }
+  return segments;
+}
+
+function routeSegmentsOverlap(a, b) {
+  if (!isAxisAligned(a.start, a.end) || !isAxisAligned(b.start, b.end)) return false;
+
+  const aHorizontal = Math.abs(a.start[1] - a.end[1]) < EPSILON;
+  const bHorizontal = Math.abs(b.start[1] - b.end[1]) < EPSILON;
+  if (aHorizontal !== bHorizontal) return false;
+
+  if (aHorizontal) {
+    if (Math.abs(a.start[1] - b.start[1]) >= EPSILON) return false;
+    const start = Math.max(Math.min(a.start[0], a.end[0]), Math.min(b.start[0], b.end[0]));
+    const end = Math.min(Math.max(a.start[0], a.end[0]), Math.max(b.start[0], b.end[0]));
+    return end - start > ROUTE_OVERLAP_MIN;
+  }
+
+  if (Math.abs(a.start[0] - b.start[0]) >= EPSILON) return false;
+  const start = Math.max(Math.min(a.start[1], a.end[1]), Math.min(b.start[1], b.end[1]));
+  const end = Math.min(Math.max(a.start[1], a.end[1]), Math.max(b.start[1], b.end[1]));
+  return end - start > ROUTE_OVERLAP_MIN;
+}
+
+function orientation(a, b, c) {
+  const cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  if (Math.abs(cross) < EPSILON) return 0;
+  return cross > 0 ? 1 : -1;
+}
+
+function between(value, a, b) {
+  return value >= Math.min(a, b) - EPSILON && value <= Math.max(a, b) + EPSILON;
+}
+
+function pointOnSegment(point, segment) {
+  return orientation(segment.start, segment.end, point) === 0
+    && between(point[0], segment.start[0], segment.end[0])
+    && between(point[1], segment.start[1], segment.end[1]);
+}
+
+function segmentsCross(a, b) {
+  if (
+    pointsEqual(a.start, b.start)
+    || pointsEqual(a.start, b.end)
+    || pointsEqual(a.end, b.start)
+    || pointsEqual(a.end, b.end)
+  ) {
+    return false;
+  }
+
+  const o1 = orientation(a.start, a.end, b.start);
+  const o2 = orientation(a.start, a.end, b.end);
+  const o3 = orientation(b.start, b.end, a.start);
+  const o4 = orientation(b.start, b.end, a.end);
+
+  if (o1 !== o2 && o3 !== o4) return true;
+
+  return (o1 === 0 && pointOnSegment(b.start, a))
+    || (o2 === 0 && pointOnSegment(b.end, a))
+    || (o3 === 0 && pointOnSegment(a.start, b))
+    || (o4 === 0 && pointOnSegment(a.end, b));
+}
 
 function validateDataflow() {
   const problems = [];
@@ -120,6 +206,34 @@ function validateDataflow() {
       const [start, end] = [routed.points[0], routed.points[routed.points.length - 1]];
       const distance = Math.hypot(end[0] - start[0], end[1] - start[1]);
       if (distance < 34) problems.push(`Flow "${flow.label}" is too short (${Math.round(distance)}px; minimum 34px) — route it through a channel or spread its nodes.`);
+    }
+  }
+
+  const flowSegments = [];
+  for (const flow of asArray(dataflow.flows)) {
+    if (!nodes.has(flow.from) || !nodes.has(flow.to)) continue;
+    const segments = segmentsFor(flow);
+    flowSegments.push(...segments);
+    if (flow.via) {
+      for (const segment of segments) {
+        if (!isAxisAligned(segment.start, segment.end)) {
+          problems.push(`Flow "${flow.label}" has a diagonal segment inside its explicit via route (${formatPoint(segment.start)} -> ${formatPoint(segment.end)}) — align via points with the source/target anchors, or use route "straight" only when a diagonal edge is intentional.`);
+        }
+      }
+    }
+  }
+
+  for (let i = 0; i < flowSegments.length; i += 1) {
+    for (let j = i + 1; j < flowSegments.length; j += 1) {
+      const a = flowSegments[i];
+      const b = flowSegments[j];
+      if (a.flow === b.flow) continue;
+      if (a.flow.to === b.flow.to) continue;
+      if (routeSegmentsOverlap(a, b)) {
+        problems.push(`Flows "${a.flow.label}" and "${b.flow.label}" reuse the same route segment — assign separate channelX/channelY values or explicit via points.`);
+      } else if (segmentsCross(a, b)) {
+        problems.push(`Flows "${a.flow.label}" and "${b.flow.label}" cross — separate their rows, sides, channelX/channelY values, or explicit via points.`);
+      }
     }
   }
 
@@ -192,7 +306,7 @@ function pathFor(flow) {
   const start = anchor(from, chosenSide(flow.fromSide, defaultFromSide(from, to)));
   const end = anchor(to, chosenSide(flow.toSide, defaultToSide(from, to)));
   const points = [start, ...routeVia(flow, from, to, start, end), end];
-  const routed = { d: polylinePath(points), points };
+  const routed = { d: roundedPath(points, 10), points };
   pathCache.set(flow, routed);
   return routed;
 }

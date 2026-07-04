@@ -70,6 +70,9 @@ For structured architecture work, use the upstream renderer bundle in `scripts/d
 2. Choose a schema from `scripts/dynamic-archify/schemas/`.
 3. Start from a close example in `scripts/dynamic-archify/examples/`.
 4. Run the relevant renderer from `scripts/dynamic-archify/renderers/`.
+5. Fix every renderer layout error before delivering, especially edge crossings,
+   reused route segments, diagonal `via` segments, label collisions, and
+   unreadably dense areas.
 
 If the renderer needs npm dependencies, install them inside `scripts/dynamic-archify/` before running. Keep generated output outside the skill directory unless updating the skill itself.
 
@@ -79,6 +82,13 @@ If the renderer needs npm dependencies, install them inside `scripts/dynamic-arc
 - Use real content hierarchy: one main claim, 3-6 sections, no dense paragraph walls.
 - Prefer visual explanation over decoration. Every shape, edge, label, and image should explain something.
 - Keep code, data, and architecture labels short enough to fit their containers.
+- For architecture/dataflow maps, route the primary flow left-to-right with
+  minimal crossings. Align `via` points to source/target anchors so explicit
+  routes stay horizontal/vertical; use `route: "straight"` only when a diagonal
+  line is intentional and readable.
+- Separate dense secondary flows with distinct rows, `channelX`/`channelY`
+  values, or explicit `via` channels. If the renderer reports crossings or
+  reused route segments, adjust the JSON before regenerating the HTML.
 - For recruiter-facing demos, put evidence first: project outcome, metric, product value, then implementation detail.
 - Avoid copying suspicious/phishing/security lookalike examples from the upstream repository into user-facing work.
 

@@ -59,6 +59,9 @@ archify/schemas/dataflow.schema.json
 
 Route presets for flows: `straight`, `vertical-channel`, `bottom-channel`,
 `top-channel`, explicit `via` points, or the default `auto` (midpoint elbow).
+Explicit `via` routes must stay horizontal/vertical from the source anchor to
+the target anchor. If a route needs a diagonal line, use `route: "straight"`
+and keep it visually short.
 
 ## Design Rules
 
@@ -73,6 +76,11 @@ Route presets for flows: `straight`, `vertical-channel`, `bottom-channel`,
 - Use `security` for PII, policy, consent, access-control, or restricted joins.
 - Use `emphasis` for the primary data path and `dashed` for async or batch
   derivations.
+- Keep the primary path mostly left-to-right and row-aligned before adding
+  secondary flows.
+- Give dense secondary flows separate rows or channels. Prefer distinct
+  `channelX`/`channelY` values over stacking multiple flows on the same
+  vertical or horizontal segment.
 - Keep labels short enough to fit in narrow previews.
 
 Schema violations exit non-zero with path-prefixed messages annotated with the
@@ -80,5 +88,6 @@ element's id or label. The renderer additionally fails when it can detect
 layout problems, including missing stages, duplicate node IDs, nodes outside
 the readable diagram area, node overlap, labels colliding with nodes or other
 labels, labels wider than their node, unknown flow endpoints, missing flow
-labels, unreadably short flows, or stages that exceed the viewBox. Text width
-is estimated CJK-aware: fullwidth glyphs count as two units.
+labels, diagonal segments inside explicit `via` routes, flow crossings, reused
+route segments, unreadably short flows, or stages that exceed the viewBox. Text
+width is estimated CJK-aware: fullwidth glyphs count as two units.
