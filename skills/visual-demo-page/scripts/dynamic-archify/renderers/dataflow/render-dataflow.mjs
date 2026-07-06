@@ -147,6 +147,67 @@ function segmentsCross(a, b) {
     || (o4 === 0 && pointOnSegment(a.end, b));
 }
 
+function targetApproachProblem(flow, points) {
+  if (flow.route === 'straight' && !flow.via) return null;
+  if (points.length < 2) return null;
+  const from = nodes.get(flow.from);
+  const to = nodes.get(flow.to);
+  const side = chosenSide(flow.toSide, defaultToSide(from, to));
+  const previous = points[points.length - 2];
+  const end = points[points.length - 1];
+  const segment = `${formatPoint(previous)} -> ${formatPoint(end)}`;
+
+  switch (side) {
+    case 'top':
+      if (Math.abs(previous[0] - end[0]) < EPSILON && previous[1] < end[1] - EPSILON) return null;
+      break;
+    case 'bottom':
+      if (Math.abs(previous[0] - end[0]) < EPSILON && previous[1] > end[1] + EPSILON) return null;
+      break;
+    case 'left':
+      if (Math.abs(previous[1] - end[1]) < EPSILON && previous[0] < end[0] - EPSILON) return null;
+      break;
+    case 'right':
+      if (Math.abs(previous[1] - end[1]) < EPSILON && previous[0] > end[0] + EPSILON) return null;
+      break;
+    default:
+      return null;
+  }
+
+  return `Flow "${flow.label}" enters target "${flow.to}" through its ${side} anchor from ${segment}; align the final via point with that anchor so the arrow approaches from the ${side}.`;
+}
+
+function insetRect(rect, amount) {
+  return {
+    x: rect.x + amount,
+    y: rect.y + amount,
+    width: Math.max(0, rect.width - amount * 2),
+    height: Math.max(0, rect.height - amount * 2)
+  };
+}
+
+function pointInsideRect([x, y], rect) {
+  return x > rect.x + EPSILON
+    && x < rect.x + rect.width - EPSILON
+    && y > rect.y + EPSILON
+    && y < rect.y + rect.height - EPSILON;
+}
+
+function segmentIntersectsRect(segment, rect) {
+  const hitBox = insetRect(rect, 2);
+  if (hitBox.width <= 0 || hitBox.height <= 0) return false;
+  if (pointInsideRect(segment.start, hitBox) || pointInsideRect(segment.end, hitBox)) return true;
+
+  const { x, y, width, height } = hitBox;
+  const edges = [
+    { start: [x, y], end: [x + width, y] },
+    { start: [x + width, y], end: [x + width, y + height] },
+    { start: [x + width, y + height], end: [x, y + height] },
+    { start: [x, y + height], end: [x, y] }
+  ];
+  return edges.some((edge) => segmentsCross(segment, edge));
+}
+
 function validateDataflow() {
   const problems = [];
   if (dataflow.schema_version !== 1) problems.push('Data-flow files must set "schema_version": 1.');
@@ -213,12 +274,23 @@ function validateDataflow() {
   for (const flow of asArray(dataflow.flows)) {
     if (!nodes.has(flow.from) || !nodes.has(flow.to)) continue;
     const segments = segmentsFor(flow);
+    const approachProblem = targetApproachProblem(flow, pathFor(flow).points);
+    if (approachProblem) problems.push(approachProblem);
     flowSegments.push(...segments);
     if (flow.via) {
       for (const segment of segments) {
         if (!isAxisAligned(segment.start, segment.end)) {
           problems.push(`Flow "${flow.label}" has a diagonal segment inside its explicit via route (${formatPoint(segment.start)} -> ${formatPoint(segment.end)}) — align via points with the source/target anchors, or use route "straight" only when a diagonal edge is intentional.`);
         }
+      }
+    }
+  }
+
+  for (const segment of flowSegments) {
+    for (const node of nodes.values()) {
+      if (node.id === segment.flow.from || node.id === segment.flow.to) continue;
+      if (segmentIntersectsRect(segment, node)) {
+        problems.push(`Flow "${segment.flow.label}" passes through node "${node.id}" (${formatPoint(segment.start)} -> ${formatPoint(segment.end)}) — route it around the node with a separate channel or explicit via points.`);
       }
     }
   }

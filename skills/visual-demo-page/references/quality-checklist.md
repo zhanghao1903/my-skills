@@ -12,6 +12,9 @@ Run this checklist before delivering a visual demo page.
   clearly labeled.
 - Explicit `via` routes stay horizontal/vertical; use a straight diagonal edge
   only when it is intentional, short, and visually readable.
+- Arrows enter each node from the side named by `toSide`: top/bottom edges use
+  a vertical final segment, and left/right edges use a horizontal final segment.
+- Flow lines do not pass through nodes that are not their source or target.
 - Flow labels do not sit on top of nodes, other labels, or busy intersections.
 - Images and iframes stay within their containers.
 - The main stage is readable at desktop width and does not collapse badly on mobile.
@@ -36,4 +39,9 @@ Run this checklist before delivering a visual demo page.
 - If an explicit route creates a sharp diagonal segment near a node: align the
   last `via` point with the target anchor centerline, or move the node to a
   row that makes the edge horizontal.
+- If an arrowhead points sideways while entering a top/bottom anchor: make the
+  final `via` point share the target anchor's x coordinate; for left/right
+  anchors, make it share the target anchor's y coordinate.
+- If a line appears to run under another node: split that output into its own
+  channel and route around the node instead of relying on overlap masking.
 - If the page looks decorative but unclear: remove background effects and add stronger labels.

@@ -81,6 +81,12 @@ and keep it visually short.
 - Give dense secondary flows separate rows or channels. Prefer distinct
   `channelX`/`channelY` values over stacking multiple flows on the same
   vertical or horizontal segment.
+- When a flow enters a node through `top`, `bottom`, `left`, or `right`, align
+  the final `via` point to that anchor's centerline so the arrowhead approaches
+  from the named side instead of turning sideways at the node edge.
+- Route flows around non-endpoint nodes. If a channel needs to pass close to a
+  node, give it a visible gap instead of relying on the node mask to hide the
+  line.
 - Keep labels short enough to fit in narrow previews.
 
 Schema violations exit non-zero with path-prefixed messages annotated with the
@@ -89,5 +95,7 @@ layout problems, including missing stages, duplicate node IDs, nodes outside
 the readable diagram area, node overlap, labels colliding with nodes or other
 labels, labels wider than their node, unknown flow endpoints, missing flow
 labels, diagonal segments inside explicit `via` routes, flow crossings, reused
-route segments, unreadably short flows, or stages that exceed the viewBox. Text
-width is estimated CJK-aware: fullwidth glyphs count as two units.
+route segments, arrows entering a target from the wrong direction, flows that
+pass through non-endpoint nodes, unreadably short flows, or stages that exceed
+the viewBox. Text width is estimated CJK-aware: fullwidth glyphs count as two
+units.
