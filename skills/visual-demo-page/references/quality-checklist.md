@@ -14,8 +14,10 @@ Run this checklist before delivering a visual demo page.
   only when it is intentional, short, and visually readable.
 - Arrows enter each node from the side named by `toSide`: top/bottom edges use
   a vertical final segment, and left/right edges use a horizontal final segment.
-- Flow lines do not pass through nodes that are not their source or target.
-- Flow labels do not sit on top of nodes, other labels, or busy intersections.
+- Flow and connection lines do not pass through nodes/components that are not
+  their source or target.
+- Flow and connection labels do not sit on top of nodes/components, other
+  labels, or busy intersections.
 - Images and iframes stay within their containers.
 - The main stage is readable at desktop width and does not collapse badly on mobile.
 - Interactive controls, if any, are keyboard/click accessible.
@@ -42,6 +44,7 @@ Run this checklist before delivering a visual demo page.
 - If an arrowhead points sideways while entering a top/bottom anchor: make the
   final `via` point share the target anchor's x coordinate; for left/right
   anchors, make it share the target anchor's y coordinate.
-- If a line appears to run under another node: split that output into its own
-  channel and route around the node instead of relying on overlap masking.
+- If a line appears to run under another node or component: split that output
+  into its own channel and route around the object instead of relying on
+  overlap masking.
 - If the page looks decorative but unclear: remove background effects and add stronger labels.

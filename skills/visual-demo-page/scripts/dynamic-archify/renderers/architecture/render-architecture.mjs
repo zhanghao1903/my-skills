@@ -45,6 +45,153 @@ function measureComponent(c) {
 }
 
 const components = new Map(asArray(arch.components).map((c) => [c.id, measureComponent(c)]));
+const EPSILON = 0.001;
+const ROUTE_OVERLAP_MIN = 10;
+
+function formatPoint([x, y]) {
+  return `${Math.round(x)},${Math.round(y)}`;
+}
+
+function pointsEqual(a, b) {
+  return Math.abs(a[0] - b[0]) < EPSILON && Math.abs(a[1] - b[1]) < EPSILON;
+}
+
+function isAxisAligned(a, b) {
+  return Math.abs(a[0] - b[0]) < EPSILON || Math.abs(a[1] - b[1]) < EPSILON;
+}
+
+function segmentsFor(conn) {
+  const routed = pathFor(conn);
+  const segments = [];
+  for (let i = 0; i < routed.points.length - 1; i += 1) {
+    const start = routed.points[i];
+    const end = routed.points[i + 1];
+    if (!pointsEqual(start, end)) {
+      segments.push({ conn, start, end });
+    }
+  }
+  return segments;
+}
+
+function routeSegmentsOverlap(a, b) {
+  if (!isAxisAligned(a.start, a.end) || !isAxisAligned(b.start, b.end)) return false;
+
+  const aHorizontal = Math.abs(a.start[1] - a.end[1]) < EPSILON;
+  const bHorizontal = Math.abs(b.start[1] - b.end[1]) < EPSILON;
+  if (aHorizontal !== bHorizontal) return false;
+
+  if (aHorizontal) {
+    if (Math.abs(a.start[1] - b.start[1]) >= EPSILON) return false;
+    const start = Math.max(Math.min(a.start[0], a.end[0]), Math.min(b.start[0], b.end[0]));
+    const end = Math.min(Math.max(a.start[0], a.end[0]), Math.max(b.start[0], b.end[0]));
+    return end - start > ROUTE_OVERLAP_MIN;
+  }
+
+  if (Math.abs(a.start[0] - b.start[0]) >= EPSILON) return false;
+  const start = Math.max(Math.min(a.start[1], a.end[1]), Math.min(b.start[1], b.end[1]));
+  const end = Math.min(Math.max(a.start[1], a.end[1]), Math.max(b.start[1], b.end[1]));
+  return end - start > ROUTE_OVERLAP_MIN;
+}
+
+function orientation(a, b, c) {
+  const cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+  if (Math.abs(cross) < EPSILON) return 0;
+  return cross > 0 ? 1 : -1;
+}
+
+function between(value, a, b) {
+  return value >= Math.min(a, b) - EPSILON && value <= Math.max(a, b) + EPSILON;
+}
+
+function pointOnSegment(point, segment) {
+  return orientation(segment.start, segment.end, point) === 0
+    && between(point[0], segment.start[0], segment.end[0])
+    && between(point[1], segment.start[1], segment.end[1]);
+}
+
+function segmentsCross(a, b) {
+  if (
+    pointsEqual(a.start, b.start)
+    || pointsEqual(a.start, b.end)
+    || pointsEqual(a.end, b.start)
+    || pointsEqual(a.end, b.end)
+  ) {
+    return false;
+  }
+
+  const o1 = orientation(a.start, a.end, b.start);
+  const o2 = orientation(a.start, a.end, b.end);
+  const o3 = orientation(b.start, b.end, a.start);
+  const o4 = orientation(b.start, b.end, a.end);
+
+  if (o1 !== o2 && o3 !== o4) return true;
+
+  return (o1 === 0 && pointOnSegment(b.start, a))
+    || (o2 === 0 && pointOnSegment(b.end, a))
+    || (o3 === 0 && pointOnSegment(a.start, b))
+    || (o4 === 0 && pointOnSegment(a.end, b));
+}
+
+function targetApproachProblem(conn, points) {
+  if (conn.route === 'straight' && !conn.via) return null;
+  if (points.length < 2) return null;
+  const from = components.get(conn.from);
+  const to = components.get(conn.to);
+  const side = chosenSide(conn.toSide, defaultToSide(from, to));
+  const previous = points[points.length - 2];
+  const end = points[points.length - 1];
+  const segment = `${formatPoint(previous)} -> ${formatPoint(end)}`;
+
+  switch (side) {
+    case 'top':
+      if (Math.abs(previous[0] - end[0]) < EPSILON && previous[1] < end[1] - EPSILON) return null;
+      break;
+    case 'bottom':
+      if (Math.abs(previous[0] - end[0]) < EPSILON && previous[1] > end[1] + EPSILON) return null;
+      break;
+    case 'left':
+      if (Math.abs(previous[1] - end[1]) < EPSILON && previous[0] < end[0] - EPSILON) return null;
+      break;
+    case 'right':
+      if (Math.abs(previous[1] - end[1]) < EPSILON && previous[0] > end[0] + EPSILON) return null;
+      break;
+    default:
+      return null;
+  }
+
+  return `Connection "${conn.label || `${conn.from}->${conn.to}`}" enters target "${conn.to}" through its ${side} anchor from ${segment}; align the final via point with that anchor so the arrow approaches from the ${side}.`;
+}
+
+function insetRect(rect, amount) {
+  return {
+    x: rect.x + amount,
+    y: rect.y + amount,
+    width: Math.max(0, rect.width - amount * 2),
+    height: Math.max(0, rect.height - amount * 2),
+  };
+}
+
+function pointInsideRect([x, y], rect) {
+  return x > rect.x + EPSILON
+    && x < rect.x + rect.width - EPSILON
+    && y > rect.y + EPSILON
+    && y < rect.y + rect.height - EPSILON;
+}
+
+function segmentIntersectsRect(segment, rect) {
+  const hitBox = insetRect(rect, 2);
+  if (hitBox.width <= 0 || hitBox.height <= 0) return false;
+  if (pointInsideRect(segment.start, hitBox) || pointInsideRect(segment.end, hitBox)) return true;
+
+  const { x, y, width, height } = hitBox;
+  const edges = [
+    { start: [x, y], end: [x + width, y] },
+    { start: [x + width, y], end: [x + width, y + height] },
+    { start: [x + width, y + height], end: [x, y + height] },
+    { start: [x, y + height], end: [x, y] },
+  ];
+  return edges.some((edge) => segmentsCross(segment, edge));
+}
 
 // ---- Boundaries computed from the `wraps` id list ---------------------------
 function boundaryRect(boundary) {
@@ -151,6 +298,47 @@ function validateArchitecture() {
     }
   }
 
+  const connectionSegments = [];
+  for (const conn of asArray(arch.connections)) {
+    if (!components.has(conn.from) || !components.has(conn.to)) continue;
+    const routed = pathFor(conn);
+    const segments = segmentsFor(conn);
+    const approachProblem = targetApproachProblem(conn, routed.points);
+    if (approachProblem) problems.push(approachProblem);
+    connectionSegments.push(...segments);
+
+    if (conn.via) {
+      for (const segment of segments) {
+        if (!isAxisAligned(segment.start, segment.end)) {
+          problems.push(`Connection "${conn.label || `${conn.from}->${conn.to}`}" has a diagonal segment inside its explicit via route (${formatPoint(segment.start)} -> ${formatPoint(segment.end)}) — align via points with the source/target anchors, or use route "straight" only when a diagonal edge is intentional.`);
+        }
+      }
+    }
+  }
+
+  for (const segment of connectionSegments) {
+    for (const c of components.values()) {
+      if (c.id === segment.conn.from || c.id === segment.conn.to) continue;
+      if (segmentIntersectsRect(segment, c)) {
+        problems.push(`Connection "${segment.conn.label || `${segment.conn.from}->${segment.conn.to}`}" passes through component "${c.id}" (${formatPoint(segment.start)} -> ${formatPoint(segment.end)}) — route it around the component with a separate channel or explicit via points.`);
+      }
+    }
+  }
+
+  for (let i = 0; i < connectionSegments.length; i += 1) {
+    for (let j = i + 1; j < connectionSegments.length; j += 1) {
+      const a = connectionSegments[i];
+      const b = connectionSegments[j];
+      if (a.conn === b.conn) continue;
+      if (a.conn.to === b.conn.to) continue;
+      if (routeSegmentsOverlap(a, b)) {
+        problems.push(`Connections "${a.conn.label || `${a.conn.from}->${a.conn.to}`}" and "${b.conn.label || `${b.conn.from}->${b.conn.to}`}" reuse the same route segment — assign separate channels or explicit via points.`);
+      } else if (segmentsCross(a, b)) {
+        problems.push(`Connections "${a.conn.label || `${a.conn.from}->${a.conn.to}`}" and "${b.conn.label || `${b.conn.from}->${b.conn.to}`}" cross — separate their rows, sides, or explicit via points.`);
+      }
+    }
+  }
+
   // Connection labels must not land on top of components.
   const labelRects = [];
   for (const conn of asArray(arch.connections)) {
@@ -163,6 +351,13 @@ function validateArchitecture() {
     for (const c of components.values()) {
       if (rectsOverlap(rect, c, -2)) {
         problems.push(`Label "${rect.label}" overlaps component "${c.id}" — adjust labelDx/labelDy/labelSegment or set labelAt.`);
+      }
+    }
+  }
+  for (let i = 0; i < labelRects.length; i += 1) {
+    for (let j = i + 1; j < labelRects.length; j += 1) {
+      if (rectsOverlap(labelRects[i], labelRects[j], -2)) {
+        problems.push(`Labels "${labelRects[i].label}" and "${labelRects[j].label}" overlap — adjust labelDx/labelDy, labelSegment, or set labelAt.`);
       }
     }
   }
