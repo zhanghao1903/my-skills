@@ -1,0 +1,4 @@
+interface:
+  display_name: "Visual Demo Page"
+  short_description: "Generate standalone visual demo pages from structured content."
+  default_prompt: "Create a visual demo page from this content."
