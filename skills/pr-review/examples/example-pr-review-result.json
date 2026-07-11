@@ -1,0 +1,151 @@
+{
+  "schema_version": "1.0",
+  "review": {
+    "repository": "acme/payments",
+    "pr_number": 482,
+    "url": "https://github.com/acme/payments/pull/482",
+    "title": "Retry provider requests after transient failures",
+    "author": "dev-example",
+    "base_ref": "main",
+    "base_sha": "1111111111111111111111111111111111111111",
+    "head_ref": "feature/provider-retry",
+    "head_sha": "7f31a9c222222222222222222222222222222222",
+    "reviewed_at": "2026-07-11T08:30:00Z",
+    "reviewer": "AI PR Reviewer",
+    "report_status": "CURRENT",
+    "review_mode": "READ_ONLY",
+    "reviewed_scope": [
+      "src/payments/provider-client.ts",
+      "src/payments/submit.ts",
+      "test/payments/retry.test.ts",
+      "payment submission and retry call path"
+    ],
+    "excluded_scope": [
+      "production provider logs were unavailable"
+    ]
+  },
+  "decision": {
+    "status": "REQUEST_CHANGES",
+    "mergeable": false,
+    "rationale": "The new retry path can create a second charge after a lost response because requests are not idempotent. The affected path is user-facing and must be fixed before merge.",
+    "blocking_finding_ids": [
+      "PRR-001"
+    ]
+  },
+  "summary": "This PR adds retries for transient provider failures. The retry implementation handles explicit 5xx responses, but it also retries after an ambiguous transport failure without preserving an idempotency key. One blocking correctness and data-integrity finding remains.",
+  "change_map": [
+    {
+      "area": "Payment provider client",
+      "change": "Adds exponential retry for transient failures",
+      "external_behavior": "A payment submission may be sent more than once",
+      "risk": "High",
+      "validation": "Static call-path inspection and targeted retry test"
+    }
+  ],
+  "findings": [
+    {
+      "id": "PRR-001",
+      "severity": "S1",
+      "blocking": true,
+      "confidence": "High",
+      "category": "data-integrity",
+      "title": "Lost-response retries can submit the same payment twice",
+      "location": {
+        "path": "src/payments/submit.ts",
+        "line_start": 118,
+        "line_end": 134,
+        "symbol": "submitPayment",
+        "side": "RIGHT",
+        "commit_sha": "7f31a9c222222222222222222222222222222222"
+      },
+      "observation": "The retry loop creates a new provider request on each attempt and does not reuse an idempotency key.",
+      "trigger": "The provider accepts the first charge, but the client loses the response and classifies the transport error as retryable.",
+      "impact": "The same customer operation can produce two provider charges and inconsistent local reconciliation state.",
+      "evidence": [
+        {
+          "kind": "code",
+          "description": "Each loop iteration calls createCharge() with a newly constructed request that has no stable idempotency identifier.",
+          "reference": "src/payments/submit.ts:118-134"
+        },
+        {
+          "kind": "test",
+          "description": "The added test covers an explicit 503 response but not an accepted request followed by a lost response.",
+          "reference": "test/payments/retry.test.ts"
+        }
+      ],
+      "remediation": "Make all attempts for one logical payment operation use the same provider idempotency key, and persist or derive that key from the local payment identity.",
+      "verification": "Add a test where the first provider call records the charge and then raises a transport error; verify subsequent attempts return the original charge and the provider receives one logical idempotency key.",
+      "status": "open",
+      "fingerprint": "data-integrity:submitPayment:missing-stable-idempotency-key"
+    }
+  ],
+  "required_actions": [
+    {
+      "finding_id": "PRR-001",
+      "action": "Make provider retries idempotent and add a lost-response regression test.",
+      "status": "open"
+    }
+  ],
+  "risks": [
+    {
+      "category": "data-integrity",
+      "level": "High",
+      "description": "Ambiguous retry outcomes can create duplicate charges.",
+      "mitigation": "Resolve PRR-001 before merge and monitor duplicate-provider-operation metrics after rollout.",
+      "owner": null
+    },
+    {
+      "category": "deployment-rollback",
+      "level": "Low",
+      "description": "The retry behavior is enabled immediately after deployment.",
+      "mitigation": "Consider a feature flag or conservative retry policy for initial rollout.",
+      "owner": null
+    }
+  ],
+  "validation": {
+    "overall_status": "PARTIAL",
+    "reviewer_runs": [
+      {
+        "command": "npm test -- retry.test.ts",
+        "environment": "Node.js 22 on Linux; test configuration; no provider network access",
+        "head_sha": "7f31a9c222222222222222222222222222222222",
+        "status": "PASS",
+        "exit_code": 0,
+        "summary": "Existing retry tests passed; no lost-response scenario was present.",
+        "evidence_ref": "artifacts/retry-test.log"
+      }
+    ],
+    "ci_checks": [
+      {
+        "name": "unit-tests",
+        "observed_at": "2026-07-11T08:20:00Z",
+        "status": "PASS",
+        "summary": "Repository unit-test check passed for the reviewed head SHA.",
+        "evidence_ref": null
+      }
+    ],
+    "not_run": [
+      {
+        "check": "Provider sandbox integration test",
+        "reason": "No sandbox credentials were available in the review environment."
+      }
+    ]
+  },
+  "limitations": [
+    "Provider sandbox behavior and production request logs were not available."
+  ],
+  "open_questions": [
+    "Does the provider guarantee idempotency when the same merchant operation ID is reused across transport retries?"
+  ],
+  "assumptions": [
+    "A transport error can occur after the provider has accepted the request."
+  ],
+  "non_blocking_recommendations": [
+    {
+      "id": "NOTE-001",
+      "category": "observability",
+      "recommendation": "Emit a metric for retry attempts and provider idempotency replays.",
+      "value": "This will make rollout anomalies and duplicate-operation prevention visible."
+    }
+  ]
+}

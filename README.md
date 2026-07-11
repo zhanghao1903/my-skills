@@ -9,12 +9,13 @@ skills/
   local-wechat-send-smoke/
   maintainability-gate/
   plato-figma-governance/
+  pr-review/
   product-workflow-gate/
   visual-demo-page/
 ```
 
 Each skill directory keeps its own `SKILL.md` and any referenced scripts,
-templates, assets, agents, or attribution files.
+templates, assets, agents, schemas, examples, or attribution files.
 
 ## Skill Index
 
@@ -23,6 +24,7 @@ templates, assets, agents, or attribution files.
 | `local-wechat-send-smoke` | Taskweavn `.agents/skills` | Run and diagnose the local macOS WeChat send MVP smoke path. |
 | `maintainability-gate` | Taskweavn `.agents/skills` | Gate maintenance, refactor, architecture hygiene, and large-file work. |
 | `plato-figma-governance` | Taskweavn `.agents/skills` | Gate Plato/Taskweavn Figma reads, writes, migrations, and handoff work. |
+| `pr-review` | Local generated skill | Perform evidence-driven, risk-oriented pull-request reviews and produce auditable Markdown and JSON results. |
 | `product-workflow-gate` | Taskweavn `.agents/skills` | Check product workflow phase, upstream artifacts, and implementation readiness. |
 | `visual-demo-page` | Local `$CODEX_HOME/skills` | Generate standalone visual explanation and architecture demo HTML pages. |
 
@@ -31,7 +33,7 @@ templates, assets, agents, or attribution files.
 Copy or symlink a skill directory into your Codex skills directory:
 
 ```bash
-cp -R skills/visual-demo-page "$CODEX_HOME/skills/"
+cp -R skills/pr-review "$CODEX_HOME/skills/"
 ```
 
 For repo-scoped usage, copy the relevant directory into that repository's
