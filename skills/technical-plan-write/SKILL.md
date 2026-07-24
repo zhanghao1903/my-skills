@@ -1,6 +1,6 @@
 ---
 name: technical-plan-write
-description: Draft or complete technical plans before implementation. Use when a user asks Codex to write, create, draft, fill in, complete, refine, or update a technical design, detailed implementation plan, ADR, feature design, architecture proposal, API/data-model proposal, migration plan, or design document. Produces or updates per-feature requirements, design, and implementation-plan documents with data structures, changed fields, data flow, object lifecycle, diagrams, risks, tests, rollout, and a writer-scoped git commit when safe. Does not approve or reject the plan.
+description: Draft or complete technical plans from confirmed requirements before implementation. Use when a user asks Codex to write, create, draft, fill in, complete, refine, or update a technical design, detailed implementation plan, ADR, feature design, architecture proposal, API/data-model proposal, migration plan, or design document. Produces or updates design and implementation-plan documents with data structures, changed fields, data flow, object lifecycle, diagrams, risks, tests, rollout, and a writer-scoped git commit when safe. Does not elicit or confirm requirements and does not approve or reject the plan.
 ---
 
 # Technical Plan Write
@@ -14,13 +14,19 @@ This skill writes and improves plans. It does not approve, reject, or produce a
 pass/fail decision. Use `technical-plan-review` after writing when the user asks
 for review or when the lifecycle requires architect review.
 
+For new feature work, require a confirmed requirements document before writing
+the technical design. If the input is still an informal request or its
+requirements status is `Draft` or `Pending Confirmation`, use
+`requirements-doc-write` first and stop for explicit user confirmation.
+
 ## Required Behavior
 
 - Create or update a per-feature directory, preferably
   `docs/feature/<feature-slug>/`.
+- Require a user-confirmed `requirements.md` or equivalent requirements
+  artifact as the input contract.
 - Prefer separate files over one large document:
-  - `requirements.md` for background, goals, scenarios, non-goals, assumptions,
-    and open questions.
+  - `requirements.md` as the confirmed input contract.
   - `design.md` for the technical design and consumer contract.
   - `implementation-plan.md` for implementation slices, files/modules, tests,
     docs, rollout, rollback, and proof.
@@ -39,18 +45,20 @@ for review or when the lifecycle requires architect review.
 
 1. Identify the feature, feature slug, branch, requested artifact, and affected
    package/module boundaries.
-2. Read repository context before writing: existing feature docs, architecture
+2. Confirm that the requirements snapshot is explicit and user-confirmed. If it
+   is not, route to `requirements-doc-write` and do not start the design.
+3. Read repository context before writing: existing feature docs, architecture
    docs, API docs, tests, examples, and current implementation surfaces.
-3. Create or update the feature directory.
-4. Write or update requirements first when the problem, goals, non-goals, or
-   scenarios are unclear.
-5. Write or update `design.md` using the design contract below.
-6. Write or update `implementation-plan.md` when developers need concrete
+4. Create or update the feature directory.
+5. Preserve the confirmed `requirements.md`; revise it only through a new
+   confirmation cycle when requirements change.
+6. Write or update `design.md` using the design contract below.
+7. Write or update `implementation-plan.md` when developers need concrete
    execution slices before coding.
-7. Add a changelog entry when repository policy requires one for workflow/docs
+8. Add a changelog entry when repository policy requires one for workflow/docs
    changes.
-8. Run lightweight validation such as `git diff --check` when feasible.
-9. Commit the writer-scoped changes according to the commit rules below.
+9. Run lightweight validation such as `git diff --check` when feasible.
+10. Commit the writer-scoped changes according to the commit rules below.
 
 Ask for user input only when a major product, API, safety, compatibility,
 security, or release decision cannot be safely inferred. Otherwise make
@@ -183,9 +191,8 @@ Use or adapt this structure for `implementation-plan.md`:
 At the end of a completed write/update pass, make one git commit for the plan
 writing work.
 
-- Stage only writer-scoped files: the feature directory, requirements/design/
-  implementation-plan files, directly related docs index updates, and required
-  changelog entry.
+- Stage only writer-scoped files: design and implementation-plan files,
+  directly related docs index updates, and the required changelog entry.
 - Do not stage unrelated dirty files, generated smoke outputs, local proof
   files, tokens, build artifacts, wheel/sdist directories, or lock files unless
   the user explicitly made them part of the plan artifact.

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Requirements Doc Write"
+  short_description: "Turn rough requests into confirmable requirements"
+  default_prompt: "Use $requirements-doc-write to turn my feature description into a requirements document for confirmation."

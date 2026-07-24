@@ -14,6 +14,7 @@ skills/
   plato-figma-governance/
   pr-review/
   product-workflow-gate/
+  requirements-doc-write/
   technical-plan-review/
   technical-plan-write/
   visual-demo-page/
@@ -39,8 +40,9 @@ examples, or attribution files under `skills/`.
 | `plato-figma-governance` | Taskweavn `.agents/skills` | Gate Plato/Taskweavn Figma reads, writes, migrations, and handoff work. |
 | `pr-review` | macos-computer-use `.agents/skills` | Perform evidence-driven, risk-oriented pull-request reviews and re-reviews with auditable Markdown and JSON results. |
 | `product-workflow-gate` | Taskweavn `.agents/skills` | Check product workflow phase, upstream artifacts, and implementation readiness. |
+| `requirements-doc-write` | Local generated skill | Turn natural-language requests into traceable requirements documents and stop for explicit user confirmation. |
 | `technical-plan-review` | macos-computer-use `.agents/skills` | Review a technical plan as an architect and issue an evidence-backed pass/fail decision. |
-| `technical-plan-write` | macos-computer-use `.agents/skills` | Write implementation-ready requirements, design, and implementation-plan documents. |
+| `technical-plan-write` | macos-computer-use `.agents/skills` | Turn confirmed requirements into an implementation-ready technical design and implementation plan. |
 | `visual-demo-page` | Local `$CODEX_HOME/skills` | Generate standalone visual explanation and architecture demo HTML pages. |
 
 ## Plugin Install
