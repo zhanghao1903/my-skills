@@ -1,6 +1,6 @@
 ---
 name: pr-review
-description: "对 Pull Request 进行证据驱动、风险导向的代码检视，并产出明确的合并决策、可执行 findings、验证证据及结构化检视报告。适用于检视 PR、分支差异、补丁或提交集合；默认只读，不会自行发布评论、批准、请求修改、推送代码或解析 review thread。"
+description: "对 Pull Request 及修复后的 re-review 进行证据驱动、风险导向的代码检视，并产出明确的合并决策、可执行 findings、验证证据及结构化检视报告。适用于初次检视、再次检视、blocker 修复验收、批准续期、分支差异、补丁或提交集合；默认只读，不会自行发布评论、批准、请求修改、推送代码或解析 review thread。"
 ---
 
 # Pull Request Review
@@ -31,6 +31,7 @@ description: "对 Pull Request 进行证据驱动、风险导向的代码检视�
 - 对高风险路径做了重点检查，而不只是逐行浏览 diff；
 - 每个 finding 都通过「归因、触发、影响、证据、可行动性、信心」质量门槛；
 - 运行过的检查有真实记录，未运行的检查明确标示；
+- re-review 同时完成旧 finding 关闭与修复诱发风险审查，而非只跑旧验证；
 - 决策与未解决的 blocking findings、验证证据及限制一致；
 - 产出符合本文件的《检视产出文档要求》。
 
@@ -63,7 +64,7 @@ description: "对 Pull Request 进行证据驱动、风险导向的代码检视�
 3. **不要泄露秘密。** 不得在报告或评论中输出 token、cookie、凭证、私钥、个人资料、完整环境变量或敏感日志；必要时进行脱敏。
 4. **谨慎执行改动后的代码。** 在运行安装脚本、构建脚本、测试或二进制文件前检查风险；避免在带有秘密、广泛网络权限或生产凭证的环境中运行不可信改动。
 5. **不得伪造验证。** 没有实际运行的测试不能写成通过；无法取得的 CI、日志或配置不能假设存在。
-6. **固定检视快照。** 报告必须记录完整 head SHA。若 PR 在检视期间发生变化，标记当前报告已 stale，并重新获取 diff 或明确限制。
+6. **固定检视快照。** 报告必须记录完整 base/head SHA。任一 SHA 变化都立即使旧 decision（包括 `APPROVE`）与 `mergeable=true` 失效；标记旧报告 stale，并执行完整 re-review gate。
 7. **尊重数据与授权边界。** 仅访问完成检视所需的 repository、PR、日志和依赖信息。
 
 ## 5. 所需输入与上下文
@@ -71,6 +72,7 @@ description: "对 Pull Request 进行证据驱动、风险导向的代码检视�
 优先获取：
 
 - repository 标识与 PR 编号或 URL；
+- 前次报告、前次 base/head SHA、decision 与 blocking finding IDs（若为 re-review）；
 - PR 标题、描述、作者、base branch、head branch；
 - base SHA、head SHA、commit 列表、完整 changed-file 列表与 diff；
 - 关联 issue、需求、设计文档、验收条件、迁移或发布计划；
@@ -96,6 +98,18 @@ description: "对 Pull Request 进行证据驱动、风险导向的代码检视�
 3. 取得 PR metadata、commit、changed files、完整 diff 与当前 checks。
 4. 标示 generated、vendored、minified、lockfile、binary 或超大文件；默认不逐行评论自动生成内容，但必须评估其来源及影响。
 5. 确认 diff 是否完整。若平台 diff 被截断，应改用本地 git 或其他完整来源。
+
+### 步骤 1A：识别并执行 re-review
+
+只要存在前次报告/finding、用户要求「再次检视」，或 reviewed base/head
+任一变化，就必须完整阅读并按顺序执行
+[`references/re-review-gates.md`](references/re-review-gates.md)。至少完成：
+
+1. 进入 re-review 即 supersede 旧 decision（即使 SHA 相同也不得继承），并冻结新旧快照；SHA 变化时再把旧报告标为 stale；
+2. 对账「前次 head → 当前 head」全部 commits/files，以及「当前 base → 当前 head」完整有效 diff；
+3. 双轨检视：Track A 重新证明旧 finding 状态，Track B 把所有修复提交视为新的不可信改动并寻找诱发风险；
+4. 记录公共契约传播、信任边界、mutation/retry/fallback 等新增风险面及反例；
+5. 在当前 head 重新裁决并明确 supersede 的旧报告。任何未分类改动或会影响决策的未覆盖范围都禁止 `APPROVE`。
 
 ### 步骤 2：建立变更意图与契约
 
@@ -125,6 +139,11 @@ description: "对 Pull Request 进行证据驱动、风险导向的代码检视�
 - 热路径、批量处理、无界集合、网络或数据库 fan-out；
 - feature flag、部署顺序、向前/向后兼容与回滚；
 - 大面积重构、跨层改动或测试显著减少。
+
+修复若新增或改变公开 field/enum/error/protocol value，必须沿
+`producer → registry/export → serialization/docs → consumer/test` 检查完整传播；
+修复若放宽 retry/fallback/mutation gate，必须把矛盾、畸形、缺失、重复与
+版本偏移输入纳入风险图，不能只验证作者提供的正常样例。
 
 ### 步骤 4：检视实现
 
@@ -180,6 +199,10 @@ description: "对 Pull Request 进行证据驱动、风险导向的代码检视�
 
 不要把「现有测试通过」等同于「改动正确」，也不要为了显示工作量执行与风险无关的大量命令。
 
+对能触发第二次 side effect 的 recovery gate，验证必须断言 side-effect
+次数与顺序。任何 present-but-malformed 或跨字段矛盾证据若仍可授权 mutation，
+应作为 correctness/safety finding，不得仅列为非阻塞 hardening。
+
 ### 步骤 7：裁决 findings
 
 一个问题只有通过以下质量门槛，才能成为 finding：
@@ -219,10 +242,16 @@ description: "对 Pull Request 进行证据驱动、风险导向的代码检视�
 - `INCOMPLETE`：diff、需求、关键依赖、测试或权限不足，无法可靠决定。
 
 不得一边给出 blocking finding，一边给出 `APPROVE`。
+不得用未验证且会改变合并结论的 assumption 支持 `APPROVE`；本地可判定的
+assumption 必须取得证据，无法验证且影响决策时使用 `INCOMPLETE`。
 
 ### 步骤 9：生成产出文档
 
-使用 `templates/PR_REVIEW_REPORT.md`，并遵守第 10 节要求。若流程需要机器处理，同时生成符合 `schemas/pr-review-result.schema.json` 的 JSON 文件。
+使用 `templates/PR_REVIEW_REPORT.md`，并遵守第 10 节要求。若流程需要机器处理，同时生成符合 `schemas/pr-review-result.schema.json` 的 JSON 文件。新报告使用 schema `1.1`，并运行：
+
+```bash
+python <skill-directory>/scripts/validate_review_result.py <result.json>
+```
 
 ### 步骤 10：可选发布
 
@@ -233,7 +262,8 @@ description: "对 Pull Request 进行证据驱动、风险导向的代码检视�
 - 将发布的 inline comments 与总体摘要；
 - 没有秘密、内部路径、无关日志或低信心猜测。
 
-PR 在报告完成后若有新 commit，先检查 comment anchor 与 finding 是否仍有效。
+PR 在报告完成后若 base/head 变化，禁止直接发布旧 decision；重新执行步骤
+1A 后，再检查 comment anchor 与 finding 是否仍有效。
 
 ## 7. Finding 写作规范
 
@@ -296,6 +326,10 @@ operation idempotent and add a test for the lost-response retry path.
 提交报告前逐项确认：
 
 - [ ] repository、PR、base SHA、head SHA 正确；
+- [ ] re-review 已作废旧 decision，并完整对账新旧快照；
+- [ ] 旧 finding closure 与 forward-risk review 两条轨道都已完成；
+- [ ] 新公共值已检查 producer、registry/export、serialization、docs、consumer 与 executable test；
+- [ ] mutation/retry/fallback gate 已覆盖缺失、畸形、重复及跨字段矛盾输入；
 - [ ] 已读 PR 意图、验收条件及必要的 surrounding code；
 - [ ] 高风险路径已按风险优先检视；
 - [ ] 每个 finding 都可定位、可触发、可解释影响、可行动、可验证；
@@ -303,6 +337,7 @@ operation idempotent and add a test for the lost-response retry path.
 - [ ] 已寻找反证并去除 speculative/duplicate findings；
 - [ ] 运行过的命令、CI 与未运行检查均真实记录；
 - [ ] decision 与 findings、证据、限制一致；
+- [ ] decision-critical assumptions 已验证，或 decision 不是 `APPROVE`；
 - [ ] 报告已脱敏；
 - [ ] 若 PR head 变化，报告已标记 stale 或完成重新检视。
 
@@ -326,10 +361,10 @@ pr-review-acme-payments-482-7f31a9c.json
 
 报告必须按顺序包含：
 
-1. **Review Metadata**：repository、PR、title、author、base/head、完整 SHA、时间、reviewer、报告状态；
+1. **Review Metadata**：repository、PR、title、author、base/head、完整 SHA、时间、reviewer、报告状态、`INITIAL | RE_REVIEW`、前次报告/快照；
 2. **Decision**：`APPROVE | REQUEST_CHANGES | COMMENT | INCOMPLETE`、mergeable、简要依据；
 3. **Executive Summary**：改动、结果、主要风险与下一步；
-4. **Scope and Change Map**：已检视/未检视范围、generated files、关键行为变化；
+4. **Scope and Change Map**：已检视/未检视范围、generated files、关键行为变化；re-review 还须包含 delta 对账、旧 finding 状态迁移、forward-risk/induced-risk 与 approval-renewal gate；
 5. **Findings**：blocking 优先，再按 severity 排序；每项使用稳定 ID；
 6. **Required Actions**：所有 merge 前必须完成的动作，并映射 finding ID；
 7. **Risk Assessment**：security、data、reliability、performance、compatibility、operations 等残余风险；
@@ -358,6 +393,9 @@ pr-review-acme-payments-482-7f31a9c.json
 - `verification`；
 - `status`：通常为 `open`，后续可更新为 `resolved | accepted-risk | false-positive`。
 
+`resolved` 必须引用当前 head 证据；`false-positive` 必须给出反证；
+`accepted-risk` 必须记录明确授权者、理由和时间，reviewer 不得自行授权。
+
 ### 10.4 证据规范
 
 - 代码证据引用 head SHA 与准确 path/line；若无法稳定定位行号，使用 symbol、函数或 diff hunk；
@@ -373,7 +411,8 @@ pr-review-acme-payments-482-7f31a9c.json
 - Required Actions 必须引用 finding ID；
 - inline comment、任务、修复 commit 与验证结果应复用同一 finding ID；
 - 重新检视时保留原 ID，新增 finding 使用新 ID；不得因排序变化重编号；
-- 报告必须说明 reviewed head SHA；head 变化后旧报告不能直接作为最新结论。
+- 报告必须说明 reviewed base/head SHA；任一变化后旧报告与 decision 都不能直接作为最新结论；
+- re-review 报告必须指明 superseded report，并记录旧 finding closure 与修复诱发风险审查；
 
 ### 10.6 无 finding 时
 
