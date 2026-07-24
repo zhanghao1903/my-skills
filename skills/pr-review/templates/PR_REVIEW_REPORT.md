@@ -13,12 +13,17 @@
 | Reviewer | `<AI/reviewer identity and version, when available>` |
 | Report status | `CURRENT \| STALE` |
 | Review mode | `READ_ONLY \| PUBLISHED` |
+| Review kind | `INITIAL \| RE_REVIEW` |
+| Previous review | `<report/ref, previous base/head and decision; N/A for INITIAL>` |
+| Previous result integrity | `<repo-relative JSON path and SHA-256; N/A for INITIAL>` |
+| Supersedes | `<previous report/ref; N/A for INITIAL>` |
 
 ## 2. Decision
 
 - **Decision:** `APPROVE | REQUEST_CHANGES | COMMENT | INCOMPLETE`
 - **Mergeable:** `true | false | unknown`
 - **Blocking findings:** `<count>` (`<IDs or none>`)
+- **Approval renewal:** `<PASS \| FAIL \| NOT_APPLICABLE>`
 - **Rationale:** `<1–3 sentences connecting the decision to findings, evidence, and limitations>`
 
 ## 3. Executive Summary
@@ -40,6 +45,42 @@
 | Area | Main change | External behavior | Risk | Validation |
 |---|---|---|---|---|
 | `<area>` | `<change>` | `<behavior>` | `High/Medium/Low` | `<method/result>` |
+
+### Re-review reconciliation
+
+`<Required for RE_REVIEW; write "Not applicable — initial review" otherwise.>`
+
+| Previous report | Previous base/head | Previous decision | Current base/head | Delta | Old decision state |
+|---|---|---|---|---|---|
+| `<ref>` | `<base/head>` | `<decision>` | `<base/head>` | `<previous-head..current-head>` | `SUPERSEDED` |
+
+- **Delta commits reviewed:** `<full SHAs or none>`
+- **Delta files reviewed:** `<paths or none>`
+- **Unclassified changes:** `<none or list; any item prohibits APPROVE>`
+- **Full base-to-head diff reconciled:** `true | false`
+
+#### Finding closure ledger
+
+| Finding | Previous status | Current status | Current-head evidence | Negative regression |
+|---|---|---|---|---|
+| `<PRR-ID>` | `<status>` | `<status>` | `<evidence>` | `<check/result>` |
+
+#### Forward-risk surfaces
+
+| Surface | Risk triggers | Affected paths | Discriminating checks | Result |
+|---|---|---|---|---|
+| `<new/widened contract or behavior>` | `<public-contract/trust-boundary/...>` | `<paths>` | `<checks>` | `PASS/FAIL/PARTIAL` |
+
+#### Approval-renewal gate
+
+- [ ] Old decision invalidated
+- [ ] Previous findings revalidated at current head
+- [ ] Forward-risk review completed
+- [ ] All delta changes classified and full PR diff reconciled
+- [ ] Decision-critical assumptions verified
+- [ ] Current-head validation and CI complete
+- [ ] No open blocker or decision-blocking limitation
+- **Independent pass:** `<PASS/FAIL/NOT_AVAILABLE/NOT_REQUIRED — reviewer and summary>`
 
 ## 5. Findings
 
@@ -113,7 +154,9 @@ No blocking findings identified for the reviewed snapshot.
 
 ### Assumptions
 
-1. `<explicit assumption used during review>`
+| Assumption | Decision-critical | Status | Evidence |
+|---|---|---|---|
+| `<explicit assumption>` | `true/false` | `VERIFIED/UNVERIFIED/NOT_VERIFIABLE` | `<evidence or none>` |
 
 ## 11. Non-blocking Recommendations
 
@@ -127,7 +170,8 @@ No blocking findings identified for the reviewed snapshot.
 - Schema: `schemas/pr-review-result.schema.json`
 
 ```yaml
-schema_version: "1.0"
+schema_version: "1.1"
+review_kind: RE_REVIEW
 decision: REQUEST_CHANGES
 mergeable: false
 head_sha: <full-head-sha>

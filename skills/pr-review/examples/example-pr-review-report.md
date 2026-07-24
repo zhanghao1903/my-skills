@@ -1,6 +1,6 @@
 # PR Review — `acme/payments#482` @ `7f31a9c`
 
-> Fictional example. Repository names, commits and findings are illustrative.
+> Fictional re-review example. Repository names, commits and findings are illustrative.
 
 ## 1. Review Metadata
 
@@ -15,67 +15,127 @@
 | Reviewer | `AI PR Reviewer` |
 | Report status | `CURRENT` |
 | Review mode | `READ_ONLY` |
+| Review kind | `RE_REVIEW` |
+| Previous review | `example-pr-review-previous-result.json` @ `6e20a1b333333333333333333333333333333333`, `REQUEST_CHANGES` |
+| Previous result integrity | `skills/pr-review/examples/example-pr-review-previous-result.json`, SHA-256 `f3281b3816fab9984a87b81812051c02f2091a209fd95bfbe1f91c0c1018bee5` |
+| Supersedes | Previous `6e20a1b` decision |
 
 ## 2. Decision
 
 - **Decision:** `REQUEST_CHANGES`
 - **Mergeable:** `false`
-- **Blocking findings:** `1` (`PRR-001`)
-- **Rationale:** The new retry path can create a second charge after a lost response because attempts are not idempotent. This is a user-facing data-integrity defect and must be fixed before merge.
+- **Blocking findings:** `1` (`PRR-002`)
+- **Approval renewal:** `WITHHELD`
+- **Rationale:** `PRR-001` is resolved, but the remediation emits
+  `idempotency_replay` without declaring it in the stable
+  `PROVIDER_OUTCOMES` registry.
 
 ## 3. Executive Summary
 
-This PR adds retries for transient payment-provider failures. Explicit 5xx responses are handled, but ambiguous transport failures are retried without preserving a stable idempotency key. The existing tests pass, yet they do not cover a request accepted by the provider followed by a lost response. One blocking finding remains.
+This re-review closes the duplicate-charge finding with a payment-scoped
+idempotency key. The independent forward-risk track found that the remediation
+also emits a new public provider outcome that is absent from the advertised
+registry. Approval renewal is withheld until `PRR-002` is resolved.
 
 ## 4. Scope and Change Map
 
 ### Reviewed scope
 
-- `src/payments/provider-client.ts`
-- `src/payments/submit.ts`
-- `test/payments/retry.test.ts`
-- Payment submission and retry call path
+- previous finding `PRR-001` closure at the current head;
+- the complete `6e20a1b...7f31a9c` remediation delta;
+- the current base-to-head payment retry path and public failure routing.
 
 ### Excluded or unavailable scope
 
-- Provider sandbox and production provider logs
+- Production provider logs and sandbox credentials.
 
 ### Change map
 
 | Area | Main change | External behavior | Risk | Validation |
 |---|---|---|---|---|
-| Payment provider client | Adds exponential retry | A logical payment may be sent more than once | High | Static call-path analysis and targeted tests |
+| Payment retry identity | Attempts reuse a key derived from the immutable payment ID. | Lost responses no longer create a second charge. | Low | Current-head lost-response regression passes. |
+| Provider outcome contract | Client emits `idempotency_replay`. | Registry consumers receive an undeclared value. | Medium | Executable registry assertion fails. |
+
+### Re-review reconciliation
+
+| Previous report | Previous base/head | Previous decision | Current base/head | Delta | Old decision state |
+|---|---|---|---|---|---|
+| `example-pr-review-previous-result.json` | `1111111` / `6e20a1b` | `REQUEST_CHANGES` | `1111111` / `7f31a9c` | `6e20a1b...7f31a9c` | `SUPERSEDED` |
+
+- **Delta commits reviewed:** `7f31a9c222222222222222222222222222222222`
+- **Delta files reviewed:** `errors.ts`, `provider-client.ts`, `submit.ts`, and `retry.test.ts`
+- **Unclassified changes:** none
+- **Full base-to-head diff reconciled:** `true`
+
+#### Finding closure ledger
+
+| Finding | Previous status | Current status | Current-head evidence | Negative regression |
+|---|---|---|---|---|
+| `PRR-001` | open | resolved | One key is derived from the immutable payment ID. | Lost-response test proves all attempts reuse it. |
+
+#### Forward-risk surfaces
+
+| Surface | Risk triggers | Affected paths | Discriminating checks | Result |
+|---|---|---|---|---|
+| New provider replay outcome | public-contract, test-adequacy | client, errors, consumer, test | Real observation plus registry membership assertion | `FAIL` → `PRR-002` |
+
+#### Approval-renewal gate
+
+- [x] Old decision invalidated
+- [x] Previous findings revalidated at current head
+- [x] Forward-risk review completed
+- [x] All delta changes classified and full PR diff reconciled
+- [x] Decision-critical assumptions verified
+- [x] Current-head validation and CI complete
+- [ ] No open blocker or decision-blocking limitation
+- **Independent pass:** `PASS` — a fresh-context reviewer reproduced `PRR-002`.
 
 ## 5. Findings
 
-### PRR-001 — [S1][Blocking][Data integrity] Lost-response retries can submit the same payment twice
+### PRR-002 — `[S2][Blocking][API contract]` New replay outcome is absent from the public registry
 
-- **Location:** `src/payments/submit.ts:118-134` @ `7f31a9c222222222222222222222222222222222`
+- **Location:** `src/payments/errors.ts:18-31` @ `7f31a9c222222222222222222222222222222222`
 - **Confidence:** High
 - **Status:** open
-- **Observation:** Each retry creates a new provider request without reusing a stable idempotency key.
-- **Trigger:** The provider accepts the first charge, but the client loses the response and retries the operation.
-- **Impact:** The same customer operation can create two provider charges and inconsistent local reconciliation state.
-- **Evidence:**
-  - The retry loop constructs a fresh request on each attempt.
-  - The added test covers an explicit 503 response but not an accepted request followed by a transport failure.
-- **Required change:** Reuse a stable idempotency key for every attempt of the same logical payment operation.
-- **Verification:** Add a regression test where the first call records the charge and then raises a transport error; verify retries return the original operation and use one idempotency key.
+- **Origin:** `DELTA_INTRODUCED`
+- **Observation:** `provider-client.ts` emits `idempotency_replay`, but
+  `PROVIDER_OUTCOMES` does not contain the value.
+- **Trigger:** A lost-response retry returns the provider's original operation
+  and a caller routes the outcome through the stable registry.
+- **Impact:** A registry consumer treats a legitimate package outcome as
+  unknown and can select the wrong recovery path.
+- **Evidence:** A real client observation returned `idempotency_replay`; the
+  registry membership assertion failed.
+- **Required change:** Declare the outcome and validate emitted observations
+  against the registry.
+- **Verification:** Registry assertion, retry tests and package CI pass.
+
+### PRR-001 — `[S1][Resolved][Data integrity]` Lost-response retries could submit the same payment twice
+
+- **Location:** `src/payments/submit.ts:118-138` @ `7f31a9c222222222222222222222222222222222`
+- **Confidence:** High
+- **Status:** resolved
+- **Origin:** `BASE_DIFF`
+- **Observation:** The current implementation reuses a payment-scoped key.
+- **Trigger:** The provider accepts the first charge and the response is lost.
+- **Impact:** The provider now returns the original operation instead of
+  creating another charge.
+- **Evidence:** The lost-response regression records one logical key.
+- **Required change:** Completed.
+- **Verification:** The original trigger returns one provider operation.
 
 ## 6. Required Actions Before Merge
 
-- [ ] `PRR-001` — Make retries idempotent and add a lost-response regression test.
+- [ ] `PRR-002` — Register the new provider outcome and add executable
+  contract coverage.
 
 ## 7. Risk Assessment
 
 | Category | Level | Residual risk | Mitigation / owner |
 |---|---|---|---|
-| Security & privacy | Low | No new authorization surface identified | Preserve current authorization tests |
-| Data integrity | High | Duplicate charges after ambiguous failure | Resolve `PRR-001` before merge |
-| Reliability & concurrency | Medium | Retry semantics depend on provider guarantees | Add explicit lost-response test |
-| Performance & scalability | Low | Bounded retry count | Monitor retry volume |
-| API & compatibility | Low | Internal behavior only | Confirm provider idempotency contract |
-| Deployment & rollback | Low | Retry behavior enabled immediately | Consider feature flag for rollout |
+| Data integrity | Low | The original duplicate path is regression-tested. | Preserve the payment-scoped identity invariant. |
+| API & compatibility | Medium | Registry consumers cannot classify the replay outcome. | Resolve `PRR-002` before merge. |
+| Deployment & rollback | Low | No persisted migration is involved. | Revert the remediation commit if necessary. |
 
 ## 8. Validation Evidence
 
@@ -83,48 +143,58 @@ This PR adds retries for transient payment-provider failures. Explicit 5xx respo
 
 | Command / check | Environment | Result | Exit code | Evidence / notes |
 |---|---|---|---:|---|
-| `npm test -- retry.test.ts` | Node.js 22, Linux, head `7f31a9c…` | PASS | 0 | Existing retry tests passed; lost-response path absent |
+| `npm test -- retry.test.ts` | Node.js 22, Linux, current head | PASS | 0 | Lost-response regression closes `PRR-001`. |
+| Registry membership assertion | Real provider-client fixture, current head | FAIL | 1 | `idempotency_replay` is undeclared. |
 
 ### CI / platform checks observed
 
 | Check | Observed at | Status | Evidence / notes |
 |---|---|---|---|
-| `unit-tests` | `2026-07-11T08:20:00Z` | PASS | Passed for reviewed head SHA |
+| `unit-tests` | `2026-07-11T08:20:00Z` | PASS | Passed for `7f31a9c`. |
 
 ### Checks not run
 
-- Provider sandbox integration test — no sandbox credentials were available.
+- Provider sandbox integration — no sandbox credentials; the deterministic
+  public-contract failure is local.
 
 ## 9. Coverage and Limitations
 
-- **Reviewed:** changed payment retry code, direct callers and tests.
+- **Reviewed:** complete remediation delta, prior finding closure, affected
+  callers, public registry and tests.
 - **Not reviewed:** provider service implementation and production logs.
-- **Missing context:** definitive provider idempotency contract.
-- **Staleness condition:** any change to the retry loop, provider request identity or payment state transition requires re-review.
+- **Missing context:** live sandbox behavior.
+- **Staleness condition:** any base/head change restarts the re-review gates.
 
 ## 10. Open Questions and Assumptions
 
 ### Open questions
 
-1. Does the provider guarantee idempotency when the same merchant operation ID is reused across transport retries?
+None that change the current request-changes decision.
 
 ### Assumptions
 
-1. A transport error can occur after the provider has accepted the request.
+| Assumption | Decision-critical | Status | Evidence |
+|---|---|---|---|
+| One immutable payment ID represents one charge. | true | VERIFIED | Identity contract and lost-response regression. |
+| Sandbox replay behavior matches production. | false | UNVERIFIED | No sandbox credentials. |
 
 ## 11. Non-blocking Recommendations
 
-- `NOTE-001` — Emit metrics for retry attempts and provider idempotency replays to support rollout monitoring.
+- `NOTE-001` — Emit an idempotency replay metric for rollout visibility.
 
 ## 12. Machine-readable Summary
 
+- Result file: `example-pr-review-result.json`
+- Schema: `schemas/pr-review-result.schema.json`
+
 ```yaml
-schema_version: "1.0"
+schema_version: "1.1"
+review_kind: RE_REVIEW
 decision: REQUEST_CHANGES
 mergeable: false
 head_sha: 7f31a9c222222222222222222222222222222222
 blocking_findings:
-  - PRR-001
-validation_status: PARTIAL
+  - PRR-002
+validation_status: FAILED
 report_status: CURRENT
 ```
