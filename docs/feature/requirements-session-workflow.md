@@ -415,3 +415,43 @@ git diff --check
 - Forward-test the Requirements-to-Main role boundary with minimal context.
 - Update plugin version, public descriptions, changelog, root index, and PR
   release record.
+
+## F5 — Verification
+
+### Automated validation
+
+- Plugin validator: passed.
+- Skill validator:
+  - `codex-workflow-init`: passed.
+  - `codex-requirements-intake`: passed.
+  - `codex-feature-main`: passed.
+  - `codex-pr-review-merge`: passed.
+- Contract validator using JSON Schema plus runtime validation: 8 fixtures
+  passed with 0 failures.
+- Plugin unit, contract, skill-contract, and workflow-state suite: 36 tests
+  passed.
+- Existing ReviewRequest/ReviewResult dispatch and merge-policy regression
+  tests remained green.
+- Repository diff check and generated-artifact inspection: passed.
+
+### Independent forward test
+
+An independent task received a direct feature request while acting as an
+initialized Main Work role without a fenced `RequirementsHandoff`.
+
+Expected and observed behavior:
+
+- remained at the F0–F1 boundary;
+- directed the user to the configured Requirements task;
+- required a confirmed fenced handoff before continuing;
+- did not synthesize a handoff, design, plan, edit code, or mutate workflow
+  state.
+
+Result: **PASS** — the requirements-confirmation gate held under minimal
+context.
+
+### Verification conclusion
+
+The three-task workflow, additive legacy upgrade, confirmation evidence,
+handoff idempotency, and existing review workflow are ready for the `0.2.0`
+metadata and release-record update.
