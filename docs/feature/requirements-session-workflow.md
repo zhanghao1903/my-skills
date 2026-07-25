@@ -141,3 +141,163 @@ collection and explicit confirmation.
   so Main Work can verify a durable repository artifact.
 - Existing schema version 1 configs will be upgraded additively by Init rather
   than invalidated solely because the Requirements route is absent.
+
+## F2 — Consumer Contract and Design
+
+### Task topology
+
+```mermaid
+flowchart LR
+    U["User"] --> R["Requirements task"]
+    R -->|"Confirmed RequirementsHandoff"| M["Main Work task"]
+    M -->|"Immutable ReviewRequest"| V["PR Review & Merge task"]
+    V -->|"Validated ReviewResult"| M
+```
+
+The Requirements task is the feature entry point. Main Work remains the only
+source-code author, and PR Review & Merge remains the only independent review
+and optionally authorized merge role.
+
+### Role ownership
+
+| Role | Owns | Must not do |
+| --- | --- | --- |
+| Requirements | Natural-language intake, requirements document, user confirmation, requirements commit/push, handoff delivery | Technical design, source implementation, PR review, merge, release |
+| Main Work | Handoff validation, design, implementation, tests/docs, PR, finding remediation, traceability | Infer confirmation, approve or merge own work |
+| PR Review & Merge | Immutable-snapshot review, findings, exact-head merge gate, result delivery | Edit or repair feature code |
+
+### Local configuration
+
+`config.threads` becomes:
+
+```json
+{
+  "requirements": "<requirements-task-id>",
+  "main": "<main-task-id>",
+  "reviewer": "<review-task-id>"
+}
+```
+
+The Requirements route is optional only while reading a legacy schema-version
+1 config. Every new or successfully upgraded config contains all three IDs,
+which must be pairwise distinct.
+
+When `init` reads a valid two-task config and the requested project, host, Main
+route, reviewer route, and merge policy are unchanged, adding
+`threads.requirements` is an additive upgrade:
+
+- preserve `workflowId`, `createdAt`, policy, and state;
+- write the three-route config atomically;
+- return `upgraded: true`;
+- do not require broad `--replace`.
+
+Any other difference retains the existing explicit replacement gate.
+
+### RequirementsHandoff contract
+
+Add `schemas/requirements-handoff.schema.json` with this public shape:
+
+```json
+{
+  "schemaVersion": 1,
+  "messageType": "RequirementsHandoff",
+  "workflowId": "<uuid>",
+  "handoffId": "<64-lowercase-hex>",
+  "repository": {
+    "key": "<24-lowercase-hex>",
+    "origin": "https://github.com/owner/repository"
+  },
+  "feature": {
+    "slug": "feature-slug",
+    "title": "Human title",
+    "branch": "feature/branch",
+    "requirementsPath": "docs/feature/feature-slug/requirements.md",
+    "requirementsCommitSha": "<40-lowercase-hex>",
+    "requirementsSha256": "<64-lowercase-hex>"
+  },
+  "confirmation": {
+    "status": "CONFIRMED",
+    "confirmedBy": "User-visible identity",
+    "confirmedAt": "<RFC3339 UTC>",
+    "evidence": "Safe summary of explicit confirmation"
+  },
+  "routes": {
+    "sourceThreadId": "<requirements-task-id>",
+    "destinationThreadId": "<main-task-id>",
+    "hostId": "<optional-host-id>"
+  },
+  "createdAt": "<RFC3339 UTC>"
+}
+```
+
+The handoff ID is a deterministic digest of workflow/repository identity,
+feature slug and branch, requirements path/commit/content digest, and the
+Requirements-to-Main route. Re-preparing the same confirmed snapshot produces
+the same ID and message.
+
+### Requirements document contract
+
+The committed requirements Markdown may use any language but must retain this
+canonical metadata block near the top:
+
+```text
+- Status: Confirmed
+- Confirmed by: <non-placeholder identity>
+- Confirmed at: <RFC3339 UTC>
+```
+
+`prepare-requirements` reads the document from the exact commit, rejects unsafe
+or escaping paths, computes its SHA-256, and rejects Draft, Pending, placeholder,
+uncommitted, or mismatched content. The Requirements role separately proves
+through GitHub that the named branch is pushed at the exact commit.
+
+### Handoff state
+
+`state.requirementsHandoffs` stores only deterministic metadata:
+
+```text
+prepared -> dispatched -> accepted
+    |
+    +----> delivery_failed -> prepared
+```
+
+The record contains feature slug, branch, document path, commit, content hash,
+route IDs, handoff digest, status, and timestamps. It does not store the title,
+confirmation prose, document contents, user request, or transcript.
+
+Main may accept a handoff before Requirements marks delivery; a later
+`mark-requirements-dispatched` call must not regress `accepted`.
+
+### Commands
+
+- `prepare-requirements`: validate the committed confirmed document, prepare
+  the idempotent handoff, and persist `prepared`.
+- `mark-requirements-dispatched`: record host-confirmed delivery without
+  regressing a fast `accepted` transition.
+- `mark-requirements-delivery-failed`: retain a retryable exact handoff.
+- `accept-requirements`: validate schema, route, repository, state digest,
+  commit, path, and content hash before moving to `accepted`.
+
+### Main Work gate
+
+Main Work accepts only fenced `RequirementsHandoff` JSON. It fetches the named
+branch, verifies GitHub points at the exact requirements commit, writes the
+payload to a task-specific temporary file, and runs `accept-requirements`.
+Only an accepted result authorizes F2 design and later phases.
+
+If the user sends an ordinary feature request directly to Main Work, Main
+reports the configured Requirements task ID and asks the user to continue
+there. It must not synthesize its own handoff.
+
+### Safety and compatibility
+
+- The requirements role may write only requirements artifacts and their
+  phase-scoped commit; it never writes implementation files.
+- No task ID is selected by title when multiple candidates exist.
+- Local state remains private and contains no raw conversation content.
+- Existing review dispatch state and schemas remain unchanged.
+- Plugin version advances to `0.2.0`; reinstall and re-run Init are required to
+  add the third task to existing installations.
+- Rollback to `0.1.0` leaves the additive Requirements route and handoff records
+  unread by the old plugin; existing Main/Reviewer routes and review records
+  remain structurally valid.
