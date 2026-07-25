@@ -429,7 +429,7 @@ git diff --check
   - `codex-requirements-intake`: passed.
   - `codex-feature-main`: passed.
   - `codex-pr-review-merge`: passed.
-- Contract validator using mandatory JSON Schema plus runtime validation: 13 fixtures
+- Contract validator using mandatory JSON Schema plus runtime validation: 14 fixtures
   passed with 0 failures.
 - Plugin unit, contract, skill-contract, and workflow-state suite: 37 tests
   passed.
