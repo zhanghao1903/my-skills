@@ -301,3 +301,74 @@ there. It must not synthesize its own handoff.
 - Rollback to `0.1.0` leaves the additive Requirements route and handoff records
   unread by the old plugin; existing Main/Reviewer routes and review records
   remain structurally valid.
+
+## F3 — Implementation Plan
+
+### Implementation slices
+
+| Slice | Files | Behavior | Verification |
+| --- | --- | --- | --- |
+| Requirements role | `skills/codex-requirements-intake/**` | Add the durable intake/confirmation role, canonical template, readiness marker, commit/push rule, and automatic handoff delivery. | Skill validation and role contract tests. |
+| Init topology | `skills/codex-workflow-init/**` | Preflight, create/bind, ready-check, persist, inspect, and recover three tasks; upgrade a healthy two-task config. | Skill contract tests and init state tests. |
+| Main gate | `skills/codex-feature-main/**` | Require an accepted RequirementsHandoff before F2; route direct requests to Requirements. | Role contract tests and forward test. |
+| Handoff protocol | `schemas/requirements-handoff.schema.json`, `scripts/workflowctl.py` | Validate, prepare, retry, dispatch, and accept exact confirmed requirements snapshots. | Positive/negative fixtures and state-machine tests. |
+| Contract tooling | `scripts/validate_contracts.py`, `tests/fixtures/**`, `tests/test_contracts.py` | Cross-check JSON Schema and runtime validators for valid and invalid handoffs. | Contract verifier and unit suite. |
+| Product metadata | `.codex-plugin/plugin.json`, `CHANGELOG.md`, root `README.md`, setup references | Describe three-role behavior, version `0.2.0`, install/update/init flow, and user entry point. | Plugin validator, JSON parsing, diff check. |
+
+### workflowctl implementation details
+
+- Keep `SCHEMA_VERSION = 1` because the new config field and state map are
+  additive and legacy config/state remain readable.
+- Accept `threads.requirements` as optional in validation but require it for
+  requirements commands and every new Init result.
+- Add `requirementsHandoffs` as an optional legacy state field and include it
+  in all newly initialized state.
+- Detect the one allowed implicit config upgrade:
+  - existing config has no Requirements route;
+  - proposed config adds it;
+  - all other config fields match after timestamp normalization.
+- Preserve existing state during that upgrade.
+- Add safe repository-relative path validation and exact committed-content
+  loading through `git show <commit>:<path>`.
+- Parse the canonical confirmation metadata from committed Markdown.
+- Store only the handoff digest and safe routing/snapshot metadata in state.
+
+### Test matrix
+
+- New Init writes three distinct routes.
+- Repeated three-task Init reuses config and identity.
+- Two-task legacy config upgrades without `--replace` and preserves review
+  dispatches.
+- Duplicate or overlapping task IDs fail.
+- Valid confirmed document prepares and accepts a handoff.
+- Draft/Pending document fails.
+- Missing commit, unsafe path, changed digest, wrong workflow/repository/route,
+  tampered handoff, and mismatched state fail.
+- Delivery failure retries the same handoff ID.
+- Fast Main acceptance cannot regress to dispatched.
+- Existing ReviewRequest/ReviewResult tests continue to pass.
+- All four plugin role skills validate and only Requirements/Main permit
+  implicit invocation.
+
+### Planned commands
+
+```text
+python3 <plugin-creator>/scripts/validate_plugin.py plugins/codex-feature-lifecycle
+python3 <skill-creator>/scripts/quick_validate.py plugins/codex-feature-lifecycle/skills/<skill>
+python3 plugins/codex-feature-lifecycle/scripts/validate_contracts.py
+python3 -m unittest discover -s plugins/codex-feature-lifecycle/tests -p 'test_*.py' -v
+python3 -m json.tool <every changed JSON file>
+git diff --check
+```
+
+### Rollout and rollback
+
+- Roll out by installing/upgrading plugin `0.2.0`, starting a new Codex task,
+  and explicitly running `$codex-workflow-init`.
+- Existing workflows remain operational for review while not upgraded, but
+  Main Work will require the new Requirements route before starting a new
+  feature.
+- Roll back by reinstalling `0.1.0`. Do not delete the Requirements task or
+  local state automatically; the old Main/Reviewer routes remain available.
+- No release publication, marketplace promotion, or automatic merge is part of
+  this implementation pass.
