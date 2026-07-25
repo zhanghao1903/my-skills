@@ -28,7 +28,7 @@
         "key": {"type": "string", "pattern": "^[0-9a-f]{24}$"},
         "origin": {
           "type": "string",
-          "pattern": "^https://github\\.com/[^/]+/[^/]+$"
+          "pattern": "^[a-z][a-z0-9+.-]*://github\\.com(?::[0-9]+)?/[^/]+/[^/]+$"
         }
       }
     },
@@ -74,7 +74,11 @@
       "properties": {
         "status": {"const": "CONFIRMED"},
         "confirmedBy": {"type": "string", "minLength": 1},
-        "confirmedAt": {"type": "string", "format": "date-time"},
+        "confirmedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
         "evidence": {"type": "string", "minLength": 1}
       }
     },
@@ -88,6 +92,10 @@
         "hostId": {"type": "string", "minLength": 1}
       }
     },
-    "createdAt": {"type": "string", "format": "date-time"}
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    }
   }
 }

@@ -86,7 +86,7 @@ class ContractTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["failures"], 0)
-        self.assertEqual(payload["fixtures"], 8)
+        self.assertEqual(payload["fixtures"], 10)
         if payload["schemaEngine"] == "jsonschema+runtime":
             for fixture in payload["results"]:
                 self.assertEqual(fixture["runtimeValid"], fixture["expectedValid"], fixture)
