@@ -30,6 +30,9 @@ HEX_64_RE = re.compile(r"^[0-9a-f]{64}$")
 REPO_KEY_RE = re.compile(r"^[0-9a-f]{24}$")
 FINDING_ID_RE = re.compile(r"^[A-Z][A-Z0-9_-]{1,63}$")
 FEATURE_SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
+RFC3339_UTC_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$"
+)
 LOCK_TIMEOUT_SECONDS = 10.0
 STALE_LOCK_SECONDS = 30.0
 MERGE_METHODS = {"squash", "merge", "rebase"}
@@ -66,7 +69,7 @@ def utc_now() -> str:
 
 
 def parse_rfc3339(value: Any, field: str) -> str:
-    if not isinstance(value, str) or not value.endswith("Z"):
+    if not isinstance(value, str) or not RFC3339_UTC_RE.fullmatch(value):
         raise WorkflowError("invalid_payload", f"{field} must be an RFC 3339 UTC timestamp")
     try:
         datetime.fromisoformat(value[:-1] + "+00:00")
@@ -871,7 +874,12 @@ def validate_requirements_handoff(value: Any) -> dict[str, Any]:
     repository = require_exact_keys(handoff["repository"], "RequirementsHandoff.repository", {"key", "origin"})
     if not REPO_KEY_RE.fullmatch(require_string(repository["key"], "RequirementsHandoff.repository.key")):
         raise WorkflowError("invalid_payload", "RequirementsHandoff repository key has an invalid format")
-    require_github_origin(require_string(repository["origin"], "RequirementsHandoff.repository.origin"))
+    origin = require_string(repository["origin"], "RequirementsHandoff.repository.origin")
+    if require_github_origin(origin) != origin:
+        raise WorkflowError(
+            "invalid_payload",
+            "RequirementsHandoff.repository.origin must use its canonical sanitized form",
+        )
     feature = require_exact_keys(
         handoff["feature"],
         "RequirementsHandoff.feature",

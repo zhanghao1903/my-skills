@@ -76,6 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--schemas", type=Path, required=True)
     parser.add_argument("--fixtures", type=Path, required=True)
+    parser.add_argument(
+        "--require-jsonschema",
+        action="store_true",
+        help="Fail instead of using runtime-only fallback when jsonschema is unavailable",
+    )
     return parser
 
 
@@ -91,6 +96,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     }
     workflowctl = load_workflowctl(Path(__file__).resolve().parent)
     schema_validators = jsonschema_validators(schemas)
+    if args.require_jsonschema and schema_validators is None:
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": "jsonschema is required for this contract validation gate",
+                    "schemaEngine": "unavailable",
+                },
+                sort_keys=True,
+            )
+        )
+        return 2
 
     fixture_paths = sorted(args.fixtures.glob("*.json"))
     if not fixture_paths:

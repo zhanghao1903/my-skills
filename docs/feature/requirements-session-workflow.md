@@ -355,7 +355,10 @@ there. It must not synthesize its own handoff.
 ```text
 python3 <plugin-creator>/scripts/validate_plugin.py plugins/codex-feature-lifecycle
 python3 <skill-creator>/scripts/quick_validate.py plugins/codex-feature-lifecycle/skills/<skill>
-python3 plugins/codex-feature-lifecycle/scripts/validate_contracts.py
+python3 plugins/codex-feature-lifecycle/scripts/validate_contracts.py \
+  --schemas plugins/codex-feature-lifecycle/schemas \
+  --fixtures plugins/codex-feature-lifecycle/tests/fixtures \
+  --require-jsonschema
 python3 -m unittest discover -s plugins/codex-feature-lifecycle/tests -p 'test_*.py' -v
 python3 -m json.tool <every changed JSON file>
 git diff --check
@@ -403,7 +406,7 @@ git diff --check
 
 ### Implementation checks
 
-- Plugin unit/contract/state suite: 36 tests passed.
+- Plugin unit/contract/state suite: 37 tests passed.
 - Existing review flow regression tests: passed.
 - Requirements handoff positive and negative runtime validation: passed.
 - JSON parsing and `git diff --check`: passed at the implementation checkpoint.
@@ -426,9 +429,9 @@ git diff --check
   - `codex-requirements-intake`: passed.
   - `codex-feature-main`: passed.
   - `codex-pr-review-merge`: passed.
-- Contract validator using JSON Schema plus runtime validation: 10 fixtures
+- Contract validator using mandatory JSON Schema plus runtime validation: 13 fixtures
   passed with 0 failures.
-- Plugin unit, contract, skill-contract, and workflow-state suite: 36 tests
+- Plugin unit, contract, skill-contract, and workflow-state suite: 37 tests
   passed.
 - Existing ReviewRequest/ReviewResult dispatch and merge-policy regression
   tests remained green.
@@ -523,7 +526,7 @@ metadata and release-record update.
 ### Preparation verification
 
 - Plugin validation with public URL manifest fields: passed.
-- Unit, contract, skill-contract, and workflow-state suite: 36 tests passed.
+- Unit, contract, skill-contract, and workflow-state suite: 37 tests passed.
 - Manifest JSON parsing and `git diff --check`: passed.
 - Generated-artifact inspection: passed.
 

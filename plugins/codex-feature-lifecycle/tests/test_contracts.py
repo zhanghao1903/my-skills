@@ -77,6 +77,7 @@ class ContractTests(unittest.TestCase):
                 str(PLUGIN_ROOT / "schemas"),
                 "--fixtures",
                 str(PLUGIN_ROOT / "tests" / "fixtures"),
+                "--require-jsonschema",
             ],
             check=False,
             capture_output=True,
@@ -85,12 +86,33 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         payload = json.loads(result.stdout)
         self.assertTrue(payload["ok"])
+        self.assertEqual(payload["schemaEngine"], "jsonschema+runtime")
         self.assertEqual(payload["failures"], 0)
-        self.assertEqual(payload["fixtures"], 10)
-        if payload["schemaEngine"] == "jsonschema+runtime":
-            for fixture in payload["results"]:
-                self.assertEqual(fixture["runtimeValid"], fixture["expectedValid"], fixture)
-                self.assertEqual(fixture["schemaValid"], fixture["expectedValid"], fixture)
+        self.assertEqual(payload["fixtures"], 13)
+        for fixture in payload["results"]:
+            self.assertEqual(fixture["runtimeValid"], fixture["expectedValid"], fixture)
+            self.assertEqual(fixture["schemaValid"], fixture["expectedValid"], fixture)
+
+    def test_required_schema_engine_fails_closed_when_dependency_is_unavailable(self) -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-S",
+                str(PLUGIN_ROOT / "scripts" / "validate_contracts.py"),
+                "--schemas",
+                str(PLUGIN_ROOT / "schemas"),
+                "--fixtures",
+                str(PLUGIN_ROOT / "tests" / "fixtures"),
+                "--require-jsonschema",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 2, result.stderr + result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["schemaEngine"], "unavailable")
 
 
 if __name__ == "__main__":
