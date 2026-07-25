@@ -48,6 +48,8 @@ def validate_runtime(payload: Any, *, workflowctl: Any) -> None:
         workflowctl.validate_review_request(payload)
     elif message_type == "ReviewResult":
         workflowctl.validate_review_result(payload)
+    elif message_type == "RequirementsHandoff":
+        workflowctl.validate_requirements_handoff(payload)
     else:
         raise ValueError("Unsupported or missing messageType")
 
@@ -74,6 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--schemas", type=Path, required=True)
     parser.add_argument("--fixtures", type=Path, required=True)
+    parser.add_argument(
+        "--require-jsonschema",
+        action="store_true",
+        help="Fail instead of using runtime-only fallback when jsonschema is unavailable",
+    )
     return parser
 
 
@@ -81,12 +88,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     request_schema_path = args.schemas / "review-request.schema.json"
     result_schema_path = args.schemas / "review-result.schema.json"
+    requirements_schema_path = args.schemas / "requirements-handoff.schema.json"
     schemas = {
         "ReviewRequest": load_json(request_schema_path),
         "ReviewResult": load_json(result_schema_path),
+        "RequirementsHandoff": load_json(requirements_schema_path),
     }
     workflowctl = load_workflowctl(Path(__file__).resolve().parent)
     schema_validators = jsonschema_validators(schemas)
+    if args.require_jsonschema and schema_validators is None:
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": "jsonschema is required for this contract validation gate",
+                    "schemaEngine": "unavailable",
+                },
+                sort_keys=True,
+            )
+        )
+        return 2
 
     fixture_paths = sorted(args.fixtures.glob("*.json"))
     if not fixture_paths:

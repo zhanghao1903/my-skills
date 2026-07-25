@@ -1,6 +1,8 @@
-# Main-Work Lifecycle Phases
+# Feature Lifecycle Phases
 
 Use one feature per branch and keep every phase independently reviewable.
+The configured Requirements task owns F0-F1 and hands a confirmed committed
+snapshot to Main Work. Main Work begins at F2.
 
 ## F0. Intake And Repository Hygiene
 
@@ -26,6 +28,11 @@ Record:
 
 Do not implement a major public, safety, compatibility, or release decision
 that remains ambiguous.
+
+Requirements are complete only after explicit user confirmation, a pushed
+requirements commit, and an accepted RequirementsHandoff. Main Work must not
+re-open or silently change this contract; material changes return to the
+Requirements task.
 
 ## F2. Design
 

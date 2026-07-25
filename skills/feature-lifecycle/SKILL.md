@@ -109,6 +109,11 @@ Clarify the feature in package-consumer terms:
 Ask only for missing decisions that cannot be safely inferred. For small
 features, infer conservative defaults and continue.
 
+Use `requirements-doc-write` when it is available to normalize the source
+request, assign stable requirement and acceptance-criterion IDs, and run the
+user confirmation gate. Do not move to F2 while the requirements document is
+still `Draft` or `Pending Confirmation`.
+
 Record confirmed requirements, assumptions, non-goals, and user scenarios in
 the feature document. Commit and push that F1 update before moving to design.
 

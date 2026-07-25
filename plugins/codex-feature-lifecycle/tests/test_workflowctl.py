@@ -26,6 +26,14 @@ class WorkflowCtlTests(unittest.TestCase):
         self.repo.mkdir()
         subprocess.run(["git", "init", "-q", str(self.repo)], check=True)
         subprocess.run(
+            ["git", "-C", str(self.repo), "config", "user.name", "Workflow Tests"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(self.repo), "config", "user.email", "workflow@example.com"],
+            check=True,
+        )
+        subprocess.run(
             ["git", "-C", str(self.repo), "remote", "add", "origin", "https://user:secret@GitHub.com/acme/project.git?token=hidden#fragment"],
             check=True,
         )
@@ -59,6 +67,8 @@ class WorkflowCtlTests(unittest.TestCase):
             "project-1",
             "--host-id",
             "local",
+            "--requirements-thread-id",
+            "requirements-thread",
             "--main-thread-id",
             "main-thread",
             "--review-thread-id",
@@ -67,6 +77,64 @@ class WorkflowCtlTests(unittest.TestCase):
             "merge-on-approve" if merge else "review-only",
             "--merge-method",
             "squash",
+        )
+
+    def create_requirements_commit(
+        self,
+        *,
+        status: str = "Confirmed",
+        confirmed_by: str = "User in Requirements task",
+        confirmed_at: str = "2026-07-25T10:00:00Z",
+    ) -> tuple[Path, str]:
+        path = self.repo / "docs" / "feature" / "device-loan" / "requirements.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "\n".join(
+                [
+                    "# Requirements: Device loan",
+                    "",
+                    f"- Status: {status}",
+                    f"- Confirmed by: {confirmed_by}",
+                    f"- Confirmed at: {confirmed_at}",
+                    "",
+                    "## Functional Requirements",
+                    "",
+                    "- REQ-001: Track device loans.",
+                    "",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "-C", str(self.repo), "add", str(path)], check=True)
+        subprocess.run(
+            ["git", "-C", str(self.repo), "commit", "-q", "-m", f"docs: {status.lower()} requirements"],
+            check=True,
+        )
+        commit = subprocess.run(
+            ["git", "-C", str(self.repo), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        return path, commit
+
+    def prepare_requirements(self, commit: str):
+        return self.run_ctl(
+            "prepare-requirements",
+            "--repo-root",
+            str(self.repo),
+            "--feature-slug",
+            "device-loan",
+            "--title",
+            "Device loan",
+            "--branch",
+            "codex/device-loan",
+            "--requirements-path",
+            "docs/feature/device-loan/requirements.md",
+            "--requirements-commit-sha",
+            commit,
+            "--confirmation-evidence",
+            "User explicitly confirmed this requirements snapshot.",
         )
 
     def prepare_review(self, *, base_sha: str = BASE_SHA, head_sha: str = HEAD_SHA, pr_url: str = "https://github.com/acme/project/pull/7"):
@@ -138,6 +206,49 @@ class WorkflowCtlTests(unittest.TestCase):
         self.assertTrue(second["reused"])
         self.assertEqual(first["config"]["workflowId"], second["config"]["workflowId"])
 
+    def test_legacy_two_task_config_upgrades_without_replacing_review_state(self) -> None:
+        initialized = self.init_workflow()
+        dispatch = self.prepare_review()["request"]
+        config_path = Path(initialized["configPath"])
+        state_path = Path(initialized["statePath"])
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        del config["threads"]["requirements"]
+        config_path.write_text(json.dumps(config), encoding="utf-8")
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        del state["requirementsHandoffs"]
+        state_path.write_text(json.dumps(state), encoding="utf-8")
+
+        upgraded = self.init_workflow()
+
+        self.assertTrue(upgraded["upgraded"])
+        self.assertFalse(upgraded["replaced"])
+        self.assertEqual(upgraded["config"]["workflowId"], initialized["config"]["workflowId"])
+        self.assertEqual(upgraded["config"]["threads"]["requirements"], "requirements-thread")
+        shown = self.run_ctl("show", "--repo-root", str(self.repo))
+        self.assertIn(dispatch["dispatchId"], shown["state"]["dispatches"])
+        self.assertEqual(shown["state"]["requirementsHandoffs"], {})
+
+    def test_init_rejects_overlapping_task_ids(self) -> None:
+        payload = self.run_ctl(
+            "init",
+            "--repo-root",
+            str(self.repo),
+            "--origin",
+            "https://github.com/acme/project",
+            "--project-id",
+            "project-1",
+            "--requirements-thread-id",
+            "main-thread",
+            "--main-thread-id",
+            "main-thread",
+            "--review-thread-id",
+            "review-thread",
+            "--merge-policy",
+            "review-only",
+            expected=2,
+        )
+        self.assertEqual(payload["error"]["code"], "invalid_config")
+
     def test_different_init_requires_explicit_replace(self) -> None:
         self.init_workflow()
         payload = self.run_ctl(
@@ -148,6 +259,8 @@ class WorkflowCtlTests(unittest.TestCase):
             "https://github.com/acme/project",
             "--project-id",
             "project-1",
+            "--requirements-thread-id",
+            "requirements-thread",
             "--main-thread-id",
             "different-main",
             "--review-thread-id",
@@ -255,6 +368,140 @@ class WorkflowCtlTests(unittest.TestCase):
         self.assertTrue(retry["shouldSend"])
         self.assertEqual(retry["status"], "prepared")
         self.assertEqual(retry["request"]["dispatchId"], dispatch_id)
+
+    def test_requirements_handoff_is_idempotent_retryable_and_accepted(self) -> None:
+        self.init_workflow()
+        _, commit = self.create_requirements_commit()
+        first = self.prepare_requirements(commit)
+        handoff = first["handoff"]
+        handoff_id = handoff["handoffId"]
+        self.assertTrue(first["shouldSend"])
+
+        self.run_ctl(
+            "mark-requirements-delivery-failed",
+            "--repo-root",
+            str(self.repo),
+            "--handoff-id",
+            handoff_id,
+            "--reason",
+            "main task temporarily unavailable",
+        )
+        retry = self.prepare_requirements(commit)
+        self.assertTrue(retry["shouldSend"])
+        self.assertEqual(retry["status"], "prepared")
+        self.assertEqual(retry["handoff"], handoff)
+
+        handoff_path = self.write_json("requirements-handoff.json", handoff)
+        accepted = self.run_ctl(
+            "accept-requirements",
+            "--repo-root",
+            str(self.repo),
+            "--handoff-file",
+            str(handoff_path),
+        )
+        self.assertTrue(accepted["accepted"])
+        duplicate = self.prepare_requirements(commit)
+        self.assertFalse(duplicate["shouldSend"])
+        self.assertEqual(duplicate["status"], "accepted")
+        self.assertEqual(duplicate["handoff"], handoff)
+
+    def test_fast_main_acceptance_does_not_regress_requirements_state(self) -> None:
+        self.init_workflow()
+        _, commit = self.create_requirements_commit()
+        handoff = self.prepare_requirements(commit)["handoff"]
+        handoff_path = self.write_json("fast-requirements-handoff.json", handoff)
+        accepted = self.run_ctl(
+            "accept-requirements",
+            "--repo-root",
+            str(self.repo),
+            "--handoff-file",
+            str(handoff_path),
+        )
+        self.assertEqual(accepted["status"], "accepted")
+        dispatched = self.run_ctl(
+            "mark-requirements-dispatched",
+            "--repo-root",
+            str(self.repo),
+            "--handoff-id",
+            handoff["handoffId"],
+        )
+        self.assertEqual(dispatched["status"], "accepted")
+
+    def test_draft_requirements_cannot_prepare_handoff(self) -> None:
+        self.init_workflow()
+        _, commit = self.create_requirements_commit(status="Draft")
+        payload = self.run_ctl(
+            "prepare-requirements",
+            "--repo-root",
+            str(self.repo),
+            "--feature-slug",
+            "device-loan",
+            "--title",
+            "Device loan",
+            "--branch",
+            "codex/device-loan",
+            "--requirements-path",
+            "docs/feature/device-loan/requirements.md",
+            "--requirements-commit-sha",
+            commit,
+            "--confirmation-evidence",
+            "No confirmation.",
+            expected=2,
+        )
+        self.assertEqual(payload["error"]["code"], "requirements_unconfirmed")
+
+    def test_tampered_or_misrouted_requirements_handoff_is_rejected(self) -> None:
+        self.init_workflow()
+        _, commit = self.create_requirements_commit()
+        handoff = self.prepare_requirements(commit)["handoff"]
+        tampered = json.loads(json.dumps(handoff))
+        tampered["confirmation"]["evidence"] = "Untrusted replacement"
+        tampered_path = self.write_json("tampered-requirements-handoff.json", tampered)
+        tampered_result = self.run_ctl(
+            "accept-requirements",
+            "--repo-root",
+            str(self.repo),
+            "--handoff-file",
+            str(tampered_path),
+            expected=2,
+        )
+        self.assertEqual(tampered_result["error"]["code"], "handoff_mismatch")
+
+        misrouted = json.loads(json.dumps(handoff))
+        misrouted["routes"]["destinationThreadId"] = "other-main"
+        misrouted_path = self.write_json("misrouted-requirements-handoff.json", misrouted)
+        misrouted_result = self.run_ctl(
+            "accept-requirements",
+            "--repo-root",
+            str(self.repo),
+            "--handoff-file",
+            str(misrouted_path),
+            expected=2,
+        )
+        self.assertEqual(misrouted_result["error"]["code"], "route_mismatch")
+
+    def test_unsafe_requirements_path_is_rejected(self) -> None:
+        self.init_workflow()
+        _, commit = self.create_requirements_commit()
+        payload = self.run_ctl(
+            "prepare-requirements",
+            "--repo-root",
+            str(self.repo),
+            "--feature-slug",
+            "device-loan",
+            "--title",
+            "Device loan",
+            "--branch",
+            "codex/device-loan",
+            "--requirements-path",
+            "../requirements.md",
+            "--requirements-commit-sha",
+            commit,
+            "--confirmation-evidence",
+            "User confirmed.",
+            expected=2,
+        )
+        self.assertEqual(payload["error"]["code"], "invalid_payload")
 
     def test_base_only_change_creates_a_new_dispatch(self) -> None:
         self.init_workflow()
@@ -408,6 +655,8 @@ class WorkflowCtlTests(unittest.TestCase):
             "https://gitlab.com/acme/project.git",
             "--project-id",
             "project-1",
+            "--requirements-thread-id",
+            "requirements-thread",
             "--main-thread-id",
             "main-thread",
             "--review-thread-id",

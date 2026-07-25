@@ -14,6 +14,7 @@ skills/
   plato-figma-governance/
   pr-review/
   product-workflow-gate/
+  requirements-doc-write/
   technical-plan-review/
   technical-plan-write/
   visual-demo-page/
@@ -27,7 +28,7 @@ examples, or attribution files under `skills/`.
 
 | Plugin | Purpose |
 | --- | --- |
-| `codex-feature-lifecycle` | Coordinate feature implementation, independent PR review, finding remediation, re-review, and merge through dedicated Codex tasks. |
+| [`codex-feature-lifecycle`](plugins/codex-feature-lifecycle/README.md) | Coordinate requirements confirmation, feature implementation, independent PR review, finding remediation, re-review, and merge through three dedicated Codex tasks. |
 
 ## Skill Index
 
@@ -39,8 +40,9 @@ examples, or attribution files under `skills/`.
 | `plato-figma-governance` | Taskweavn `.agents/skills` | Gate Plato/Taskweavn Figma reads, writes, migrations, and handoff work. |
 | `pr-review` | macos-computer-use `.agents/skills` | Perform evidence-driven, risk-oriented pull-request reviews and re-reviews with auditable Markdown and JSON results. |
 | `product-workflow-gate` | Taskweavn `.agents/skills` | Check product workflow phase, upstream artifacts, and implementation readiness. |
+| `requirements-doc-write` | Local generated skill | Turn natural-language requests into traceable requirements documents and stop for explicit user confirmation. |
 | `technical-plan-review` | macos-computer-use `.agents/skills` | Review a technical plan as an architect and issue an evidence-backed pass/fail decision. |
-| `technical-plan-write` | macos-computer-use `.agents/skills` | Write implementation-ready requirements, design, and implementation-plan documents. |
+| `technical-plan-write` | macos-computer-use `.agents/skills` | Turn confirmed requirements into an implementation-ready technical design and implementation plan. |
 | `visual-demo-page` | Local `$CODEX_HOME/skills` | Generate standalone visual explanation and architecture demo HTML pages. |
 
 ## Plugin Install
@@ -48,12 +50,14 @@ examples, or attribution files under `skills/`.
 Add this repository as a marketplace and install the plugin:
 
 ```bash
-codex plugin marketplace add https://github.com/zhanghao1903/my-skills.git
+codex plugin marketplace add zhanghao1903/my-skills --ref main
 codex plugin add codex-feature-lifecycle@my-skills
 ```
 
 Start a new Codex task after installation, then invoke
-`$codex-workflow-init` from the repository where the workflow should run.
+`$codex-workflow-init` from the repository where the workflow should run. Init
+creates or binds three durable tasks: Requirements, Main Work, and PR Review &
+Merge. Send each new feature request to the configured Requirements task first.
 
 ## Local Install
 

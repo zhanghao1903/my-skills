@@ -1,0 +1,6 @@
+interface:
+  display_name: "Codex Requirements Intake"
+  short_description: "Collect and confirm requirements before implementation"
+  default_prompt: "Use $codex-requirements-intake to turn this feature request into a confirmed requirements handoff."
+policy:
+  allow_implicit_invocation: true

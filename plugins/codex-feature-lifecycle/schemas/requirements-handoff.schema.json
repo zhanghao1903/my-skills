@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zhanghao1903/my-skills/blob/main/plugins/codex-feature-lifecycle/schemas/requirements-handoff.schema.json",
+  "title": "RequirementsHandoff",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "messageType",
+    "workflowId",
+    "handoffId",
+    "repository",
+    "feature",
+    "confirmation",
+    "routes",
+    "createdAt"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "messageType": {"const": "RequirementsHandoff"},
+    "workflowId": {"type": "string", "format": "uuid"},
+    "handoffId": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "origin"],
+      "properties": {
+        "key": {"type": "string", "pattern": "^[0-9a-f]{24}$"},
+        "origin": {
+          "type": "string",
+          "pattern": "^(?!file:)[a-z][a-z0-9+.-]*://github\\.com(?::[0-9]+)?/[^/?#@]+/(?![^/?#@]*\\.git$)[^/?#@]+$"
+        }
+      }
+    },
+    "feature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug",
+        "title",
+        "branch",
+        "requirementsPath",
+        "requirementsCommitSha",
+        "requirementsSha256"
+      ],
+      "properties": {
+        "slug": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+        },
+        "title": {"type": "string", "minLength": 1},
+        "branch": {"type": "string", "minLength": 1},
+        "requirementsPath": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*[\\\\:]).+$"
+        },
+        "requirementsCommitSha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "requirementsSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "confirmation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "confirmedBy", "confirmedAt", "evidence"],
+      "properties": {
+        "status": {"const": "CONFIRMED"},
+        "confirmedBy": {"type": "string", "minLength": 1},
+        "confirmedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "evidence": {"type": "string", "minLength": 1}
+      }
+    },
+    "routes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceThreadId", "destinationThreadId"],
+      "properties": {
+        "sourceThreadId": {"type": "string", "minLength": 1},
+        "destinationThreadId": {"type": "string", "minLength": 1},
+        "hostId": {"type": "string", "minLength": 1}
+      }
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    }
+  }
+}

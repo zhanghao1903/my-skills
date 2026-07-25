@@ -1,13 +1,14 @@
 ---
 name: codex-workflow-init
-description: Initialize, inspect, repair, or reconfigure the Codex Feature Lifecycle workflow for a GitHub repository. Use only when the user explicitly asks to initialize the workflow, create or bind its main and review tasks, change its merge policy, repair stale task routes, or show workflow configuration/status. Requires Codex Desktop task-management capabilities; do not use for ordinary feature implementation or standalone PR review.
+description: Initialize, inspect, upgrade, repair, or reconfigure the Codex Feature Lifecycle workflow for a GitHub repository. Use only when the user explicitly asks to initialize the workflow, create or bind its Requirements, Main Work, and PR Review & Merge tasks, upgrade a legacy two-task workflow, change its merge policy, repair stale task routes, or show workflow configuration/status. Requires Codex Desktop task-management capabilities; do not use for ordinary feature implementation or standalone PR review.
 ---
 
 # Codex Workflow Init
 
-Establish one repository-scoped main task and one review-and-merge task. Make
-initialization idempotent, prove both routes before declaring success, and
-store only local routing and policy state.
+Establish one repository-scoped Requirements task, one Main Work task, and one
+PR Review & Merge task—exactly three role tasks. Make initialization
+idempotent, prove all three routes before declaring success, and store only
+local routing and policy state.
 
 Read [setup and recovery](references/setup-and-recovery.md) when the user asks
 how to install, update, uninstall, locate local state, or recover a partial
@@ -66,12 +67,15 @@ Do not create a projectless task for a repository workflow.
 1. Resolve the canonical repository root and sanitized origin.
 2. Run `workflowctl.py locate --repo-root <root>`.
 3. Run `workflowctl.py show --repo-root <root>`.
-4. If valid config exists, call `read_thread` for both configured task IDs.
-5. When both routes are reachable and the user did not request a policy or
-   route change, reuse the workflow and create no tasks.
-6. When config is stale, do not overwrite it silently. Discover exact-title
-   task candidates. Bind a single unambiguous healthy pair; otherwise ask the
-   user which pair to use or whether replacements should be created.
+4. If valid config exists, call `read_thread` for every configured task ID.
+5. When all three routes are reachable and the user did not request a policy
+   or route change, reuse the workflow and create no tasks.
+6. When a valid legacy config has reachable Main and Reviewer routes but no
+   Requirements route, treat it as an additive upgrade. Preserve its workflow
+   identity, policy, and review state; create or bind only Requirements.
+7. When config is stale, do not overwrite it silently. Discover exact-title
+   task candidates. Bind one unambiguous healthy complete set; otherwise ask the
+   user which complete set to use or whether replacements should be created.
 
 Config-not-found is the expected path for first initialization, not an error to
 hide. Invalid schema, repository mismatch, or unreachable configured tasks must
@@ -96,14 +100,24 @@ no-blocker merges and never authorizes release publication or admin bypass.
 Prefer binding healthy existing tasks when the user selected them. Otherwise:
 
 1. Call `list_projects` and select the exact current repository.
-2. Create both tasks in that project's `local` environment. Omit model and
-   reasoning overrides so user defaults apply.
+2. Create all missing tasks in that project's `local` environment. Omit model
+   and reasoning overrides so user defaults apply.
 3. Track the IDs created by this Init attempt in memory until configuration is
    committed.
 4. Title and pin the tasks:
+   - `Requirements · <repository-name>`
    - `Feature Main · <repository-name>`
    - `PR Review & Merge · <repository-name>`
 5. Use these bounded bootstrap prompts.
+
+Requirements prompt:
+
+```text
+Use $codex-requirements-intake as the durable requirements role for
+<repository-root>. Do not collect a feature yet. Confirm the canonical
+repository and reply with exactly REQUIREMENTS_READY when the role is loaded
+and the checkout is accessible.
+```
 
 Main prompt:
 
@@ -122,10 +136,12 @@ validated ReviewRequest and never edit the feature branch. Reply with exactly
 REVIEW_READY when the role is loaded and the checkout is accessible.
 ```
 
-6. Wait for both tasks. After trimming surrounding whitespace, the entire final
-   response must equal the expected marker (`MAIN_READY` or `REVIEW_READY`) and
-   contain no other text. Substring matches such as `NOT_MAIN_READY` fail.
-7. If either task fails, do not write ready config. Archive only tasks created
+6. Wait for all three tasks. After trimming surrounding whitespace, the entire
+   final response must equal the expected marker (`REQUIREMENTS_READY`,
+   `MAIN_READY`, or `REVIEW_READY`) and contain no other text. Substring matches
+   such as `NOT_REQUIREMENTS_READY`, `NOT_MAIN_READY`, or `NOT_REVIEW_READY`
+   fail.
+7. If any task fails, do not write ready config. Archive only tasks created
    by this failed attempt when the host supports recoverable archive and the
    target is exact. Otherwise report their IDs for manual recovery.
 
@@ -134,7 +150,7 @@ announce that action in commentary immediately before taking it.
 
 ## Persist Only After Readiness
 
-After both tasks are proven reachable, run:
+After all three tasks are proven reachable, run:
 
 ```text
 workflowctl.py init
@@ -142,6 +158,7 @@ workflowctl.py init
   --origin <origin>
   --project-id <project-id>
   [--host-id <host-id>]
+  --requirements-thread-id <requirements-id>
   --main-thread-id <main-id>
   --review-thread-id <review-id>
   --merge-policy <review-only|merge-on-approve>
@@ -150,21 +167,24 @@ workflowctl.py init
   [--replace]
 ```
 
-Use `--replace` only after explicit reconfiguration/repair and after proving the
-new routes. If writing the user-local Codex state requires sandbox escalation,
-request the narrow approval and retry; do not fall back to a tracked repository
-file.
+Adding the first Requirements route to an otherwise identical valid two-task
+config is an additive upgrade and must not use `--replace`. Use `--replace`
+only after explicit reconfiguration/repair that changes another route or
+policy, and only after proving the new routes. If writing the user-local Codex
+state requires sandbox escalation, request the narrow approval and retry; do
+not fall back to a tracked repository file.
 
-Then run `workflowctl.py validate --repo-root <root>` and read both tasks once
-more. Initialization succeeds only when script validation and task reachability
-both pass.
+Then run `workflowctl.py validate --repo-root <root>` and read all three tasks
+once more. Initialization succeeds only when script validation, a configured
+Requirements route, and all task reachability checks pass.
 
 ## Idempotency
 
-- A healthy repeated Init creates no tasks and does not rewrite config.
+- A healthy repeated three-task Init creates no tasks and does not rewrite
+  config.
 - Never select tasks by title alone when multiple candidates match.
 - Never overwrite a different config without explicit repair/reconfiguration.
-- Never report a partial task pair as ready.
+- Never report a partial task set as ready.
 - Never store tokens, prompts, transcripts, code, diffs, or findings in config.
 
 ## Final Response
@@ -173,11 +193,12 @@ Return:
 
 - Initialization: created, bound, reused, repaired, or failed
 - Repository and workflow ID
+- Requirements task ID and reachability
 - Main task ID and reachability
 - Reviewer task ID and reachability
 - Merge policy, method, and branch deletion policy
 - Config path and validation result
 - GitHub capability used
 - Any partial resources or recovery action
-- Next action: on success, send the feature request to the main task; on
-  failure, resolve the reported preflight/recovery issue and rerun Init
+- Next action: on success, send the feature request to the Requirements task;
+  on failure, resolve the reported preflight/recovery issue and rerun Init
