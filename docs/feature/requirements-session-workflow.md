@@ -455,3 +455,30 @@ context.
 The three-task workflow, additive legacy upgrade, confirmation evidence,
 handoff idempotency, and existing review workflow are ready for the `0.2.0`
 metadata and release-record update.
+
+## F6 — Documentation and Release Record
+
+### Public metadata
+
+- Advanced `codex-feature-lifecycle` from `0.1.0` to `0.2.0`.
+- Updated the plugin description and default prompts to make Requirements the
+  entry point for new features.
+- Updated the repository plugin index and install guidance to describe the
+  three durable tasks.
+- Added a plugin changelog with upgrade and compatibility notes.
+
+### Release impact
+
+- New installs create Requirements, Main Work, and PR Review & Merge tasks.
+- Existing healthy `0.1.x` two-task configurations can be upgraded additively
+  by rerunning Init with a new Requirements task.
+- Existing review dispatch records and merge policy are preserved.
+- No external release tag, marketplace promotion, merge, or deployment was
+  performed in this change.
+
+### Pull request record
+
+- Target repository: `zhanghao1903/my-skills`.
+- Target pull request: `#4`.
+- The pull request description records the new standalone requirements skill,
+  plugin `0.2.0` topology, compatibility behavior, and verification evidence.

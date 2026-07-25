@@ -28,7 +28,7 @@ examples, or attribution files under `skills/`.
 
 | Plugin | Purpose |
 | --- | --- |
-| `codex-feature-lifecycle` | Coordinate feature implementation, independent PR review, finding remediation, re-review, and merge through dedicated Codex tasks. |
+| `codex-feature-lifecycle` | Coordinate requirements confirmation, feature implementation, independent PR review, finding remediation, re-review, and merge through three dedicated Codex tasks. |
 
 ## Skill Index
 
@@ -55,7 +55,9 @@ codex plugin add codex-feature-lifecycle@my-skills
 ```
 
 Start a new Codex task after installation, then invoke
-`$codex-workflow-init` from the repository where the workflow should run.
+`$codex-workflow-init` from the repository where the workflow should run. Init
+creates or binds three durable tasks: Requirements, Main Work, and PR Review &
+Merge. Send each new feature request to the configured Requirements task first.
 
 ## Local Install
 
