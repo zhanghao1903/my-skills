@@ -29,3 +29,11 @@ All notable changes to `codex-feature-lifecycle` are recorded here.
 - Existing review and merge contracts are unchanged.
 - Reinstall or upgrade the plugin and rerun `$codex-workflow-init` to add the
   Requirements task to an existing workflow.
+
+### Documentation
+
+- Added a user guide with installation, initialization, upgrade, uninstall,
+  local-data cleanup, and troubleshooting guidance.
+- Added public support, privacy, and terms documents.
+- Added public-directory listing copy, starter prompts, reproducible positive
+  and negative test cases, and a submission checklist.

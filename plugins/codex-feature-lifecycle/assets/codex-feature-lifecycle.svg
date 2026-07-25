@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
   <title id="title">Codex Feature Lifecycle</title>
-  <desc id="desc">Two connected work and review loops with a completion check.</desc>
+  <desc id="desc">A connected feature lifecycle with a completion check.</desc>
   <defs>
     <linearGradient id="background" x1="24" y1="20" x2="232" y2="236" gradientUnits="userSpaceOnUse">
       <stop stop-color="#172554"/>

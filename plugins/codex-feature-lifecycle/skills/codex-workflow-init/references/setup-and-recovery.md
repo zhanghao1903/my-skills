@@ -6,13 +6,14 @@ In Codex Desktop, add the repository as a marketplace and install
 `codex-feature-lifecycle`. From the CLI, the equivalent flow is:
 
 ```bash
-codex plugin marketplace add https://github.com/zhanghao1903/my-skills.git
+codex plugin marketplace add zhanghao1903/my-skills --ref main
 codex plugin add codex-feature-lifecycle@my-skills
+codex plugin list
 ```
 
-Restart Codex if the host does not discover newly installed skills in the
-current process. Then explicitly invoke `$codex-workflow-init` from a trusted
-GitHub repository checkout.
+Start a new Codex task after installation so the host discovers the bundled
+skills. Then explicitly invoke `$codex-workflow-init` from a trusted GitHub
+repository checkout.
 
 ## Initialize
 
@@ -52,8 +53,14 @@ verify schema, repository binding, and state consistency.
 
 ## Update
 
-Update the marketplace checkout or reinstall the newer plugin version through
-Codex. Start a new task and re-run `$codex-workflow-init`. A healthy three-task
+Refresh the configured Git marketplace and reinstall the plugin:
+
+```bash
+codex plugin marketplace upgrade my-skills
+codex plugin add codex-feature-lifecycle@my-skills
+```
+
+Start a new task and re-run `$codex-workflow-init`. A healthy three-task
 workflow is reused without creating tasks or rewriting config. A healthy
 version `0.1.x` two-task workflow is upgraded by adding only Requirements while
 preserving workflow identity, merge policy, and review state. Never manually
@@ -76,8 +83,20 @@ edit `schemaVersion` or task routes.
 
 ## Uninstall
 
-Uninstall the plugin through Codex. Uninstalling does not delete user-owned
-tasks or repository-scoped local state. Archive tasks explicitly if no longer
-needed. Delete the exact `<repo-key>` state directory only after confirming it
-belongs to the intended repository; this is irreversible and removes retry
-history and durable merge policy.
+Before uninstalling, record the exact project state path for every repository
+whose workflow data you may want to remove.
+
+```bash
+codex plugin remove codex-feature-lifecycle@my-skills
+```
+
+Uninstalling does not delete user-owned tasks or repository-scoped local state.
+Archive tasks explicitly if no longer needed. Delete the exact `<repo-key>`
+state directory only after confirming it belongs to the intended repository;
+this is irreversible and removes retry history and durable merge policy.
+
+Remove the marketplace only when no other installed plugin depends on it:
+
+```bash
+codex plugin marketplace remove my-skills
+```

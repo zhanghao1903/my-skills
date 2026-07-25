@@ -482,3 +482,58 @@ metadata and release-record update.
 - Target pull request: `#4`.
 - The pull request description records the new standalone requirements skill,
   plugin `0.2.0` topology, compatibility behavior, and verification evidence.
+
+## F7 — Public Directory Preparation
+
+### Distribution paths
+
+- GitHub marketplace source: `zhanghao1903/my-skills`, marketplace name
+  `my-skills`.
+- Public-directory submission type: **Skills only**.
+- Release version: `0.2.0`.
+- Public submission must use the final merged `main` tree, not a PR branch or
+  local working copy.
+- The submitted bundle digest and merged commit SHA must be recorded before
+  selecting **Submit for Review**.
+
+### User-facing documentation
+
+- Added a plugin-root user guide covering prerequisites, GitHub marketplace
+  installation, initialization, upgrade, uninstall, local-data cleanup,
+  troubleshooting, and safety boundaries.
+- Expanded the Init setup reference with the current CLI commands:
+  - `codex plugin marketplace add`;
+  - `codex plugin marketplace upgrade`;
+  - `codex plugin add`;
+  - `codex plugin remove`;
+  - optional `codex plugin marketplace remove`.
+- Added public support, privacy, and terms documents and linked their final
+  `main` URLs from the plugin manifest.
+
+### Store submission materials
+
+- Added final listing copy, public URLs, capability/prerequisite disclosure,
+  four starter prompts, data-handling summary, and initial release notes.
+- Added five positive and three negative reviewer-reproducible test cases.
+- Added a submission checklist covering repository proof, Platform access,
+  skill bundle integrity, portal fields, availability, attestations, and final
+  submission evidence.
+- Updated the changelog to include documentation and submission preparation.
+
+### Preparation verification
+
+- Plugin validation with public URL manifest fields: passed.
+- Unit, contract, skill-contract, and workflow-state suite: 36 tests passed.
+- Manifest JSON parsing and `git diff --check`: passed.
+- Generated-artifact inspection: passed.
+
+### Remaining publication gates
+
+- Freeze and independently review the final PR base/head snapshot.
+- Resolve any findings, revalidate, mark the PR ready, and merge it.
+- Verify all public `main` URLs after merge.
+- Build the submission ZIP from the exact merged tree and record its SHA-256.
+- In the OpenAI Platform portal, select the publisher's verified developer
+  identity and publisher-approved country availability.
+- Submit the completed skills-only draft for review and record its portal ID,
+  submission time, and status.

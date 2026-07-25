@@ -28,7 +28,7 @@ examples, or attribution files under `skills/`.
 
 | Plugin | Purpose |
 | --- | --- |
-| `codex-feature-lifecycle` | Coordinate requirements confirmation, feature implementation, independent PR review, finding remediation, re-review, and merge through three dedicated Codex tasks. |
+| [`codex-feature-lifecycle`](plugins/codex-feature-lifecycle/README.md) | Coordinate requirements confirmation, feature implementation, independent PR review, finding remediation, re-review, and merge through three dedicated Codex tasks. |
 
 ## Skill Index
 
@@ -50,7 +50,7 @@ examples, or attribution files under `skills/`.
 Add this repository as a marketplace and install the plugin:
 
 ```bash
-codex plugin marketplace add https://github.com/zhanghao1903/my-skills.git
+codex plugin marketplace add zhanghao1903/my-skills --ref main
 codex plugin add codex-feature-lifecycle@my-skills
 ```
 

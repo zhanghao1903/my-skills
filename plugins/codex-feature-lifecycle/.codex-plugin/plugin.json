@@ -29,6 +29,9 @@
       "Interactive",
       "Write"
     ],
+    "websiteURL": "https://github.com/zhanghao1903/my-skills/tree/main/plugins/codex-feature-lifecycle",
+    "privacyPolicyURL": "https://github.com/zhanghao1903/my-skills/blob/main/plugins/codex-feature-lifecycle/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/zhanghao1903/my-skills/blob/main/plugins/codex-feature-lifecycle/TERMS.md",
     "defaultPrompt": [
       "Initialize the Codex feature lifecycle workflow for this repository.",
       "Use the requirements role to turn this feature request into a confirmed handoff.",
