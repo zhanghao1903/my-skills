@@ -30,9 +30,18 @@ class ContractTests(unittest.TestCase):
             return json.load(handle)
 
     def test_positive_request_and_results_pass_runtime_validation(self) -> None:
+        self.workflowctl.validate_requirements_handoff(
+            self.load_fixture("requirements-handoff.valid.json")
+        )
         self.workflowctl.validate_review_request(self.load_fixture("review-request.valid.json"))
         self.workflowctl.validate_review_result(self.load_fixture("review-result.approve.valid.json"))
         self.workflowctl.validate_review_result(self.load_fixture("review-result.changes.valid.json"))
+
+    def test_unconfirmed_requirements_handoff_is_rejected(self) -> None:
+        with self.assertRaises(self.workflowctl.WorkflowError):
+            self.workflowctl.validate_requirements_handoff(
+                self.load_fixture("requirements-handoff.invalid.unconfirmed.json")
+            )
 
     def test_extra_request_field_is_rejected(self) -> None:
         with self.assertRaises(self.workflowctl.WorkflowError):
@@ -77,7 +86,7 @@ class ContractTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["failures"], 0)
-        self.assertEqual(payload["fixtures"], 6)
+        self.assertEqual(payload["fixtures"], 8)
         if payload["schemaEngine"] == "jsonschema+runtime":
             for fixture in payload["results"]:
                 self.assertEqual(fixture["runtimeValid"], fixture["expectedValid"], fixture)

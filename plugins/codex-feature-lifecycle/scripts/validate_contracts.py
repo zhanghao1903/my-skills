@@ -48,6 +48,8 @@ def validate_runtime(payload: Any, *, workflowctl: Any) -> None:
         workflowctl.validate_review_request(payload)
     elif message_type == "ReviewResult":
         workflowctl.validate_review_result(payload)
+    elif message_type == "RequirementsHandoff":
+        workflowctl.validate_requirements_handoff(payload)
     else:
         raise ValueError("Unsupported or missing messageType")
 
@@ -81,9 +83,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     request_schema_path = args.schemas / "review-request.schema.json"
     result_schema_path = args.schemas / "review-result.schema.json"
+    requirements_schema_path = args.schemas / "requirements-handoff.schema.json"
     schemas = {
         "ReviewRequest": load_json(request_schema_path),
         "ReviewResult": load_json(result_schema_path),
+        "RequirementsHandoff": load_json(requirements_schema_path),
     }
     workflowctl = load_workflowctl(Path(__file__).resolve().parent)
     schema_validators = jsonschema_validators(schemas)

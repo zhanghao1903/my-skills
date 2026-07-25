@@ -372,3 +372,46 @@ git diff --check
   local state automatically; the old Main/Reviewer routes remain available.
 - No release publication, marketplace promotion, or automatic merge is part of
   this implementation pass.
+
+## F4 — Implementation Notes
+
+### Completed implementation
+
+- Added `codex-requirements-intake` as an implicitly invocable durable role
+  skill with:
+  - natural-language requirements normalization;
+  - canonical confirmation metadata;
+  - requirements-only commit and push boundaries;
+  - automatic structured handoff to Main Work;
+  - idempotent delivery and revision rules.
+- Added `RequirementsHandoff` JSON Schema, positive/negative fixtures, runtime
+  validation, and schema/runtime parity checks.
+- Extended `workflowctl.py` with:
+  - additive legacy config and state validation;
+  - exactly three distinct task routes for new Init;
+  - safe legacy two-task upgrade preserving workflow identity and review state;
+  - committed requirements path/content/confirmation validation;
+  - deterministic handoff ID and digest;
+  - prepare, delivery-success, delivery-failure, and accept commands;
+  - fast-acceptance-safe state transitions.
+- Updated Init to create/bind/wait for Requirements, Main Work, and PR Review &
+  Merge and to direct new features to Requirements.
+- Updated Main Work to refuse direct unconfirmed feature requests, validate
+  RequirementsHandoff, and start lifecycle execution at F2.
+- Preserved existing ReviewRequest, ReviewResult, reviewer role, and merge
+  authorization behavior.
+
+### Implementation checks
+
+- Plugin unit/contract/state suite: 36 tests passed.
+- Existing review flow regression tests: passed.
+- Requirements handoff positive and negative runtime validation: passed.
+- JSON parsing and `git diff --check`: passed at the implementation checkpoint.
+
+### Deferred to F5/F6
+
+- Run plugin and all four skill validators with their validation dependencies.
+- Run JSON Schema validation through `jsonschema`, not only runtime fallback.
+- Forward-test the Requirements-to-Main role boundary with minimal context.
+- Update plugin version, public descriptions, changelog, root index, and PR
+  release record.

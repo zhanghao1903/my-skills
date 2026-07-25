@@ -19,7 +19,7 @@ import tempfile
 import time
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Mapping, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
@@ -29,6 +29,7 @@ SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 HEX_64_RE = re.compile(r"^[0-9a-f]{64}$")
 REPO_KEY_RE = re.compile(r"^[0-9a-f]{24}$")
 FINDING_ID_RE = re.compile(r"^[A-Z][A-Z0-9_-]{1,63}$")
+FEATURE_SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 LOCK_TIMEOUT_SECONDS = 10.0
 STALE_LOCK_SECONDS = 30.0
 MERGE_METHODS = {"squash", "merge", "rebase"}
@@ -144,6 +145,74 @@ def require_https_url(value: Any, field: str) -> str:
     if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
         raise WorkflowError("invalid_payload", f"{field} must be an HTTPS URL without credentials")
     return text
+
+
+def require_repo_relative_path(value: Any, field: str) -> str:
+    text = require_string(value, field)
+    if "\\" in text or ":" in text:
+        raise WorkflowError("invalid_payload", f"{field} must use a safe POSIX repository-relative path")
+    path = PurePosixPath(text)
+    if path.is_absolute() or not path.parts or any(part in {"", ".", ".."} for part in path.parts):
+        raise WorkflowError("invalid_payload", f"{field} must stay inside the repository")
+    return path.as_posix()
+
+
+def read_committed_file(repo_root: Path, commit_sha: str, relative_path: str) -> bytes:
+    commit = require_sha(commit_sha, "requirementsCommitSha")
+    path = require_repo_relative_path(relative_path, "requirementsPath")
+    try:
+        subprocess.run(
+            ["git", "-C", str(repo_root), "cat-file", "-e", f"{commit}^{{commit}}"],
+            check=True,
+            capture_output=True,
+        )
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), "show", f"{commit}:{path}"],
+            check=True,
+            capture_output=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise WorkflowError(
+            "requirements_snapshot_missing",
+            "The exact requirements commit and document must exist in the local repository",
+        ) from exc
+    return result.stdout
+
+
+def parse_confirmation_metadata(content: bytes) -> dict[str, str]:
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise WorkflowError("invalid_requirements", "Requirements document must be UTF-8 Markdown") from exc
+    expected = {
+        "Status": "status",
+        "Confirmed by": "confirmedBy",
+        "Confirmed at": "confirmedAt",
+    }
+    found: dict[str, list[str]] = {field: [] for field in expected.values()}
+    for line in text.splitlines()[:80]:
+        for label, field in expected.items():
+            prefix = f"- {label}: "
+            if line.startswith(prefix):
+                found[field].append(line[len(prefix) :].strip())
+    for field, values in found.items():
+        if len(values) != 1:
+            raise WorkflowError(
+                "invalid_requirements",
+                f"Requirements document must contain exactly one canonical {field} metadata value",
+            )
+    if found["status"][0] != "Confirmed":
+        raise WorkflowError("requirements_unconfirmed", "Requirements document status must be Confirmed")
+    confirmed_by = found["confirmedBy"][0]
+    if (
+        not confirmed_by
+        or confirmed_by.lower() == "pending"
+        or "<" in confirmed_by
+        or ">" in confirmed_by
+    ):
+        raise WorkflowError("requirements_unconfirmed", "Confirmed by must identify the confirming user")
+    confirmed_at = parse_rfc3339(found["confirmedAt"][0], "requirements.ConfirmedAt")
+    return {"confirmedBy": confirmed_by, "confirmedAt": confirmed_at}
 
 
 def canonical_repo_root(repo_root: str | os.PathLike[str]) -> Path:
@@ -359,11 +428,19 @@ def validate_config(config: Any, *, expected_root: Path | None = None, expected_
     require_string(value["projectId"], "config.projectId")
     if "hostId" in value:
         require_string(value["hostId"], "config.hostId")
-    threads = require_exact_keys(value["threads"], "config.threads", {"main", "reviewer"})
+    threads = require_exact_keys(
+        value["threads"],
+        "config.threads",
+        {"main", "reviewer"},
+        {"requirements"},
+    )
     main_id = require_string(threads["main"], "config.threads.main")
     reviewer_id = require_string(threads["reviewer"], "config.threads.reviewer")
-    if main_id == reviewer_id:
-        raise WorkflowError("invalid_config", "Main and reviewer task IDs must differ")
+    thread_ids = [main_id, reviewer_id]
+    if "requirements" in threads:
+        thread_ids.append(require_string(threads["requirements"], "config.threads.requirements"))
+    if len(thread_ids) != len(set(thread_ids)):
+        raise WorkflowError("invalid_config", "Configured task IDs must be pairwise distinct")
     policy = require_exact_keys(
         value["policy"],
         "config.policy",
@@ -386,6 +463,7 @@ def initial_state(workflow_id: str) -> dict[str, Any]:
     return {
         "schemaVersion": SCHEMA_VERSION,
         "workflowId": workflow_id,
+        "requirementsHandoffs": {},
         "dispatches": {},
         "updatedAt": utc_now(),
     }
@@ -489,8 +567,68 @@ def validate_dispatch_record(dispatch_id: str, record: Any) -> dict[str, Any]:
     return value
 
 
+def validate_requirements_handoff_record(handoff_id: str, record: Any) -> dict[str, Any]:
+    if not HEX_64_RE.fullmatch(handoff_id):
+        raise WorkflowError("invalid_state", "State contains an invalid requirements handoff ID")
+    value = require_exact_keys(
+        record,
+        f"state.requirementsHandoffs.{handoff_id}",
+        {
+            "featureSlug",
+            "branch",
+            "requirementsPath",
+            "requirementsCommitSha",
+            "requirementsSha256",
+            "sourceThreadId",
+            "destinationThreadId",
+            "handoffCreatedAt",
+            "handoffDigest",
+            "status",
+            "preparedAt",
+        },
+        {
+            "dispatchedAt",
+            "deliveryFailedAt",
+            "deliveryError",
+            "acceptedAt",
+        },
+    )
+    field = f"state.requirementsHandoffs.{handoff_id}"
+    slug = require_string(value["featureSlug"], f"{field}.featureSlug")
+    if not FEATURE_SLUG_RE.fullmatch(slug):
+        raise WorkflowError("invalid_state", f"{field}.featureSlug is invalid")
+    require_string(value["branch"], f"{field}.branch")
+    require_repo_relative_path(value["requirementsPath"], f"{field}.requirementsPath")
+    require_sha(value["requirementsCommitSha"], f"{field}.requirementsCommitSha")
+    for name in ("requirementsSha256", "handoffDigest"):
+        if not HEX_64_RE.fullmatch(require_string(value[name], f"{field}.{name}")):
+            raise WorkflowError("invalid_state", f"{field}.{name} must be 64 lowercase hex characters")
+    source = require_string(value["sourceThreadId"], f"{field}.sourceThreadId")
+    destination = require_string(value["destinationThreadId"], f"{field}.destinationThreadId")
+    if source == destination:
+        raise WorkflowError("invalid_state", f"{field} routes must use different task IDs")
+    status = require_string(value["status"], f"{field}.status")
+    if status not in {"prepared", "delivery_failed", "dispatched", "accepted"}:
+        raise WorkflowError("invalid_state", f"{field}.status is unsupported")
+    for name in ("handoffCreatedAt", "preparedAt", "dispatchedAt", "deliveryFailedAt", "acceptedAt"):
+        if name in value:
+            parse_rfc3339(value[name], f"{field}.{name}")
+    if "deliveryError" in value:
+        require_string(value["deliveryError"], f"{field}.deliveryError")
+    if status == "delivery_failed" and not {"deliveryFailedAt", "deliveryError"}.issubset(value):
+        raise WorkflowError("invalid_state", f"{field} delivery failure metadata is incomplete")
+    if status == "accepted" and "acceptedAt" not in value:
+        raise WorkflowError("invalid_state", f"{field}.acceptedAt is required for accepted state")
+    return value
+
+
 def validate_state(state: Any, config: Mapping[str, Any]) -> dict[str, Any]:
-    value = require_exact_keys(state, "state", {"schemaVersion", "workflowId", "dispatches", "updatedAt"})
+    value = require_exact_keys(
+        state,
+        "state",
+        {"schemaVersion", "workflowId", "dispatches", "updatedAt"},
+        {"requirementsHandoffs"},
+    )
     if require_int(value["schemaVersion"], "state.schemaVersion") != SCHEMA_VERSION:
         raise WorkflowError("unsupported_schema", "Unsupported state schema version")
     workflow_id = require_uuid(value["workflowId"], "state.workflowId")
@@ -500,6 +638,11 @@ def validate_state(state: Any, config: Mapping[str, Any]) -> dict[str, Any]:
         raise WorkflowError("invalid_state", "state.dispatches must be an object")
     for dispatch_id, record in value["dispatches"].items():
         validate_dispatch_record(dispatch_id, record)
+    requirements_handoffs = value.get("requirementsHandoffs", {})
+    if not isinstance(requirements_handoffs, dict):
+        raise WorkflowError("invalid_state", "state.requirementsHandoffs must be an object")
+    for handoff_id, record in requirements_handoffs.items():
+        validate_requirements_handoff_record(handoff_id, record)
     parse_rfc3339(value["updatedAt"], "state.updatedAt")
     return value
 
@@ -701,13 +844,190 @@ def validate_review_result(value: Any) -> dict[str, Any]:
     return result
 
 
+def validate_requirements_handoff(value: Any) -> dict[str, Any]:
+    handoff = require_exact_keys(
+        value,
+        "RequirementsHandoff",
+        {
+            "schemaVersion",
+            "messageType",
+            "workflowId",
+            "handoffId",
+            "repository",
+            "feature",
+            "confirmation",
+            "routes",
+            "createdAt",
+        },
+    )
+    if require_int(handoff["schemaVersion"], "RequirementsHandoff.schemaVersion") != SCHEMA_VERSION:
+        raise WorkflowError("unsupported_schema", "Unsupported RequirementsHandoff schema version")
+    if handoff["messageType"] != "RequirementsHandoff":
+        raise WorkflowError("invalid_payload", "RequirementsHandoff.messageType must be RequirementsHandoff")
+    require_uuid(handoff["workflowId"], "RequirementsHandoff.workflowId")
+    handoff_id = require_string(handoff["handoffId"], "RequirementsHandoff.handoffId")
+    if not HEX_64_RE.fullmatch(handoff_id):
+        raise WorkflowError("invalid_payload", "RequirementsHandoff.handoffId must be 64 lowercase hex characters")
+    repository = require_exact_keys(handoff["repository"], "RequirementsHandoff.repository", {"key", "origin"})
+    if not REPO_KEY_RE.fullmatch(require_string(repository["key"], "RequirementsHandoff.repository.key")):
+        raise WorkflowError("invalid_payload", "RequirementsHandoff repository key has an invalid format")
+    require_github_origin(require_string(repository["origin"], "RequirementsHandoff.repository.origin"))
+    feature = require_exact_keys(
+        handoff["feature"],
+        "RequirementsHandoff.feature",
+        {
+            "slug",
+            "title",
+            "branch",
+            "requirementsPath",
+            "requirementsCommitSha",
+            "requirementsSha256",
+        },
+    )
+    slug = require_string(feature["slug"], "RequirementsHandoff.feature.slug")
+    if not FEATURE_SLUG_RE.fullmatch(slug):
+        raise WorkflowError("invalid_payload", "RequirementsHandoff feature slug must use lowercase hyphen-case")
+    require_string(feature["title"], "RequirementsHandoff.feature.title")
+    require_string(feature["branch"], "RequirementsHandoff.feature.branch")
+    feature["requirementsPath"] = require_repo_relative_path(
+        feature["requirementsPath"],
+        "RequirementsHandoff.feature.requirementsPath",
+    )
+    require_sha(feature["requirementsCommitSha"], "RequirementsHandoff.feature.requirementsCommitSha")
+    if not HEX_64_RE.fullmatch(
+        require_string(feature["requirementsSha256"], "RequirementsHandoff.feature.requirementsSha256")
+    ):
+        raise WorkflowError(
+            "invalid_payload",
+            "RequirementsHandoff.feature.requirementsSha256 must be 64 lowercase hex characters",
+        )
+    confirmation = require_exact_keys(
+        handoff["confirmation"],
+        "RequirementsHandoff.confirmation",
+        {"status", "confirmedBy", "confirmedAt", "evidence"},
+    )
+    if confirmation["status"] != "CONFIRMED":
+        raise WorkflowError("requirements_unconfirmed", "RequirementsHandoff confirmation status must be CONFIRMED")
+    require_string(confirmation["confirmedBy"], "RequirementsHandoff.confirmation.confirmedBy")
+    parse_rfc3339(confirmation["confirmedAt"], "RequirementsHandoff.confirmation.confirmedAt")
+    require_string(confirmation["evidence"], "RequirementsHandoff.confirmation.evidence")
+    routes = require_exact_keys(
+        handoff["routes"],
+        "RequirementsHandoff.routes",
+        {"sourceThreadId", "destinationThreadId"},
+        {"hostId"},
+    )
+    source = require_string(routes["sourceThreadId"], "RequirementsHandoff.routes.sourceThreadId")
+    destination = require_string(routes["destinationThreadId"], "RequirementsHandoff.routes.destinationThreadId")
+    if source == destination:
+        raise WorkflowError("invalid_payload", "RequirementsHandoff routes must use different task IDs")
+    if "hostId" in routes:
+        require_string(routes["hostId"], "RequirementsHandoff.routes.hostId")
+    parse_rfc3339(handoff["createdAt"], "RequirementsHandoff.createdAt")
+    return handoff
+
+
 def load_payload(path: str, *, expected: str) -> dict[str, Any]:
     payload = read_json(Path(path), code="missing_payload")
     if expected == "request":
         return validate_review_request(payload)
     if expected == "result":
         return validate_review_result(payload)
+    if expected == "requirements":
+        return validate_requirements_handoff(payload)
     raise AssertionError(expected)
+
+
+def require_requirements_route(config: Mapping[str, Any]) -> str:
+    requirements_thread_id = config["threads"].get("requirements")
+    if not requirements_thread_id:
+        raise WorkflowError(
+            "requirements_not_configured",
+            "Workflow has no Requirements task; run codex-workflow-init to upgrade it",
+        )
+    return require_string(requirements_thread_id, "config.threads.requirements")
+
+
+def compute_requirements_handoff_id(
+    config: Mapping[str, Any],
+    *,
+    slug: str,
+    branch: str,
+    requirements_path: str,
+    requirements_commit_sha: str,
+    requirements_sha256: str,
+) -> str:
+    material = "\n".join(
+        [
+            config["workflowId"],
+            config["repository"]["key"],
+            slug,
+            branch,
+            requirements_path,
+            requirements_commit_sha,
+            requirements_sha256,
+            require_requirements_route(config),
+            config["threads"]["main"],
+        ]
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def expected_requirements_handoff_metadata(handoff: Mapping[str, Any]) -> dict[str, Any]:
+    feature = handoff["feature"]
+    return {
+        "featureSlug": feature["slug"],
+        "branch": feature["branch"],
+        "requirementsPath": feature["requirementsPath"],
+        "requirementsCommitSha": feature["requirementsCommitSha"],
+        "requirementsSha256": feature["requirementsSha256"],
+        "sourceThreadId": handoff["routes"]["sourceThreadId"],
+        "destinationThreadId": handoff["routes"]["destinationThreadId"],
+        "handoffCreatedAt": handoff["createdAt"],
+        "handoffDigest": digest_json(handoff),
+    }
+
+
+def validate_requirements_handoff_against_config(
+    handoff: Mapping[str, Any],
+    config: Mapping[str, Any],
+) -> None:
+    if handoff["workflowId"] != config["workflowId"]:
+        raise WorkflowError("route_mismatch", "RequirementsHandoff workflow ID does not match local config")
+    if handoff["repository"] != {
+        "key": config["repository"]["key"],
+        "origin": config["repository"]["origin"],
+    }:
+        raise WorkflowError("route_mismatch", "RequirementsHandoff repository does not match local config")
+    expected_routes = {
+        "sourceThreadId": require_requirements_route(config),
+        "destinationThreadId": config["threads"]["main"],
+    }
+    if config.get("hostId"):
+        expected_routes["hostId"] = config["hostId"]
+    if handoff["routes"] != expected_routes:
+        raise WorkflowError("route_mismatch", "RequirementsHandoff routes do not match local config")
+    feature = handoff["feature"]
+    expected_id = compute_requirements_handoff_id(
+        config,
+        slug=feature["slug"],
+        branch=feature["branch"],
+        requirements_path=feature["requirementsPath"],
+        requirements_commit_sha=feature["requirementsCommitSha"],
+        requirements_sha256=feature["requirementsSha256"],
+    )
+    if handoff["handoffId"] != expected_id:
+        raise WorkflowError("handoff_mismatch", "RequirementsHandoff ID is invalid")
+
+
+def validate_requirements_handoff_against_record(
+    handoff: Mapping[str, Any],
+    record: Mapping[str, Any],
+) -> None:
+    expected = expected_requirements_handoff_metadata(handoff)
+    for key, value in expected.items():
+        if record.get(key) != value:
+            raise WorkflowError("handoff_mismatch", f"RequirementsHandoff does not match stored field: {key}")
 
 
 def compute_dispatch_id(config: Mapping[str, Any], pr_number: int, base_sha: str, head_sha: str) -> str:
@@ -846,7 +1166,11 @@ def command_init(args: argparse.Namespace) -> dict[str, Any]:
             "workflowId": workflow_id,
             "repository": {"root": str(root), "origin": origin, "key": paths["key"]},
             "projectId": args.project_id,
-            "threads": {"main": args.main_thread_id, "reviewer": args.review_thread_id},
+            "threads": {
+                "requirements": args.requirements_thread_id,
+                "main": args.main_thread_id,
+                "reviewer": args.review_thread_id,
+            },
             "policy": {
                 "mergeOnApprove": merge_on_approve,
                 "mergeMethod": args.merge_method,
@@ -861,8 +1185,13 @@ def command_init(args: argparse.Namespace) -> dict[str, Any]:
             config["hostId"] = args.host_id
         validate_config(config, expected_root=root, expected_origin=origin)
 
+        legacy_upgrade = False
         if existing and not args.replace:
             comparable_existing = dict(existing)
+            comparable_existing["threads"] = dict(existing["threads"])
+            if "requirements" not in comparable_existing["threads"]:
+                comparable_existing["threads"]["requirements"] = args.requirements_thread_id
+                legacy_upgrade = True
             comparable_existing["updatedAt"] = now
             if comparable_existing != config:
                 raise WorkflowError(
@@ -870,24 +1199,34 @@ def command_init(args: argparse.Namespace) -> dict[str, Any]:
                     "A different workflow configuration already exists; use explicit replacement after validating routes",
                     details={"configPath": str(config_path)},
                 )
-            return {
-                "ok": True,
-                "reused": True,
-                "configPath": str(config_path),
-                "statePath": str(state_path),
-                "config": existing,
-            }
+            if not legacy_upgrade:
+                return {
+                    "ok": True,
+                    "reused": True,
+                    "upgraded": False,
+                    "configPath": str(config_path),
+                    "statePath": str(state_path),
+                    "config": existing,
+                }
 
-        atomic_write_json(config_path, config)
+        write_state = False
         if existing and state_path.exists():
             state = validate_state(read_json(state_path), config)
+            if "requirementsHandoffs" not in state:
+                state["requirementsHandoffs"] = {}
+                state["updatedAt"] = now
+                write_state = True
         else:
             state = initial_state(workflow_id)
+            write_state = True
+        atomic_write_json(config_path, config)
+        if write_state:
             atomic_write_json(state_path, state)
         return {
             "ok": True,
             "reused": False,
-            "replaced": bool(existing),
+            "upgraded": legacy_upgrade,
+            "replaced": bool(existing and not legacy_upgrade),
             "configPath": str(config_path),
             "statePath": str(state_path),
             "config": config,
@@ -912,9 +1251,193 @@ def command_validate(args: argparse.Namespace) -> dict[str, Any]:
         "valid": True,
         "workflowId": config["workflowId"],
         "repositoryKey": config["repository"]["key"],
+        "requirementsThreadConfigured": bool(config["threads"].get("requirements")),
+        "requirementsHandoffCount": len(state.get("requirementsHandoffs", {})),
         "dispatchCount": len(state["dispatches"]),
         "configPath": str(paths["config"]),
         "statePath": str(paths["state"]),
+    }
+
+
+def command_prepare_requirements(args: argparse.Namespace) -> dict[str, Any]:
+    root, _, paths, config, state = load_context(args.repo_root)
+    requirements_thread_id = require_requirements_route(config)
+    slug = require_string(args.feature_slug, "featureSlug")
+    if not FEATURE_SLUG_RE.fullmatch(slug):
+        raise WorkflowError("invalid_payload", "Feature slug must use lowercase hyphen-case")
+    title = require_string(args.title, "title")
+    branch = require_string(args.branch, "branch")
+    requirements_path = require_repo_relative_path(args.requirements_path, "requirementsPath")
+    requirements_commit_sha = require_sha(args.requirements_commit_sha.lower(), "requirementsCommitSha")
+    content = read_committed_file(root, requirements_commit_sha, requirements_path)
+    confirmation = parse_confirmation_metadata(content)
+    requirements_sha256 = hashlib.sha256(content).hexdigest()
+    handoff: dict[str, Any] = {
+        "schemaVersion": SCHEMA_VERSION,
+        "messageType": "RequirementsHandoff",
+        "workflowId": config["workflowId"],
+        "handoffId": compute_requirements_handoff_id(
+            config,
+            slug=slug,
+            branch=branch,
+            requirements_path=requirements_path,
+            requirements_commit_sha=requirements_commit_sha,
+            requirements_sha256=requirements_sha256,
+        ),
+        "repository": {
+            "key": config["repository"]["key"],
+            "origin": config["repository"]["origin"],
+        },
+        "feature": {
+            "slug": slug,
+            "title": title,
+            "branch": branch,
+            "requirementsPath": requirements_path,
+            "requirementsCommitSha": requirements_commit_sha,
+            "requirementsSha256": requirements_sha256,
+        },
+        "confirmation": {
+            "status": "CONFIRMED",
+            "confirmedBy": confirmation["confirmedBy"],
+            "confirmedAt": confirmation["confirmedAt"],
+            "evidence": require_string(args.confirmation_evidence, "confirmationEvidence")[:500],
+        },
+        "routes": {
+            "sourceThreadId": requirements_thread_id,
+            "destinationThreadId": config["threads"]["main"],
+        },
+        "createdAt": utc_now(),
+    }
+    if config.get("hostId"):
+        handoff["routes"]["hostId"] = config["hostId"]
+    validate_requirements_handoff(handoff)
+    validate_requirements_handoff_against_config(handoff, config)
+    handoff_id = handoff["handoffId"]
+
+    with StateLock(Path(paths["lock"])):
+        current_state = (
+            read_json(Path(paths["state"]), code="missing_state")
+            if Path(paths["state"]).exists()
+            else state
+        )
+        current_state = validate_state(current_state, config)
+        handoffs = current_state.setdefault("requirementsHandoffs", {})
+        existing = handoffs.get(handoff_id)
+        should_send = True
+        status = "prepared"
+        if existing:
+            handoff["createdAt"] = existing["handoffCreatedAt"]
+            validate_requirements_handoff(handoff)
+            metadata = expected_requirements_handoff_metadata(handoff)
+            for key, value in metadata.items():
+                if existing.get(key) != value:
+                    raise WorkflowError(
+                        "handoff_collision",
+                        f"Existing requirements handoff does not match field: {key}",
+                    )
+            status = existing["status"]
+            should_send = status in {"prepared", "delivery_failed"}
+            if status == "delivery_failed":
+                existing["status"] = "prepared"
+                existing["preparedAt"] = utc_now()
+                existing["handoffDigest"] = metadata["handoffDigest"]
+                existing.pop("deliveryError", None)
+                status = "prepared"
+        else:
+            metadata = expected_requirements_handoff_metadata(handoff)
+            handoffs[handoff_id] = {
+                **metadata,
+                "status": "prepared",
+                "preparedAt": utc_now(),
+            }
+        current_state["updatedAt"] = utc_now()
+        atomic_write_json(Path(paths["state"]), current_state)
+    return {
+        "ok": True,
+        "shouldSend": should_send,
+        "status": status,
+        "handoff": handoff,
+    }
+
+
+def get_requirements_handoff(state: Mapping[str, Any], handoff_id: str) -> dict[str, Any]:
+    if not HEX_64_RE.fullmatch(handoff_id):
+        raise WorkflowError("invalid_handoff", "Handoff ID must be 64 lowercase hex characters")
+    record = state.get("requirementsHandoffs", {}).get(handoff_id)
+    if not isinstance(record, dict):
+        raise WorkflowError("unknown_handoff", "Handoff ID is not known to this workflow")
+    return record
+
+
+def mutate_requirements_handoff(args: argparse.Namespace, operation: str) -> dict[str, Any]:
+    _, _, paths, config, _ = load_context(args.repo_root)
+    with StateLock(Path(paths["lock"])):
+        state = validate_state(read_json(Path(paths["state"]), code="missing_state"), config)
+        record = get_requirements_handoff(state, args.handoff_id)
+        current = record["status"]
+        if operation == "dispatched":
+            if current in {"prepared", "delivery_failed"}:
+                record["status"] = "dispatched"
+            elif current not in {"dispatched", "accepted"}:
+                raise WorkflowError("invalid_transition", f"Cannot mark {current} handoff as dispatched")
+            record.setdefault("dispatchedAt", utc_now())
+            record.pop("deliveryError", None)
+        elif operation == "delivery_failed":
+            if current not in {"prepared", "delivery_failed"}:
+                raise WorkflowError("invalid_transition", f"Cannot mark {current} handoff as delivery_failed")
+            record["status"] = "delivery_failed"
+            record["deliveryFailedAt"] = utc_now()
+            record["deliveryError"] = require_string(args.reason, "reason")[:500]
+        else:
+            raise AssertionError(operation)
+        state["updatedAt"] = utc_now()
+        atomic_write_json(Path(paths["state"]), state)
+    return {"ok": True, "handoffId": args.handoff_id, "status": record["status"]}
+
+
+def command_accept_requirements(args: argparse.Namespace) -> dict[str, Any]:
+    handoff = load_payload(args.handoff_file, expected="requirements")
+    root, _, paths, config, state = load_context(args.repo_root)
+    require_requirements_route(config)
+    validate_requirements_handoff_against_config(handoff, config)
+    feature = handoff["feature"]
+    content = read_committed_file(
+        root,
+        feature["requirementsCommitSha"],
+        feature["requirementsPath"],
+    )
+    if hashlib.sha256(content).hexdigest() != feature["requirementsSha256"]:
+        raise WorkflowError("snapshot_mismatch", "Committed requirements content digest does not match handoff")
+    confirmation = parse_confirmation_metadata(content)
+    if confirmation["confirmedBy"] != handoff["confirmation"]["confirmedBy"]:
+        raise WorkflowError("snapshot_mismatch", "Confirmed-by metadata does not match handoff")
+    if confirmation["confirmedAt"] != handoff["confirmation"]["confirmedAt"]:
+        raise WorkflowError("snapshot_mismatch", "Confirmed-at metadata does not match handoff")
+
+    handoff_id = handoff["handoffId"]
+    with StateLock(Path(paths["lock"])):
+        state = validate_state(read_json(Path(paths["state"]), code="missing_state"), config)
+        record = get_requirements_handoff(state, handoff_id)
+        validate_requirements_handoff_against_record(handoff, record)
+        if record["status"] in {"prepared", "delivery_failed", "dispatched"}:
+            record["status"] = "accepted"
+            record["acceptedAt"] = utc_now()
+            accepted = True
+            duplicate = False
+        elif record["status"] == "accepted":
+            accepted = False
+            duplicate = True
+        else:
+            raise WorkflowError("invalid_transition", f"Cannot accept {record['status']} requirements handoff")
+        state["updatedAt"] = utc_now()
+        atomic_write_json(Path(paths["state"]), state)
+    return {
+        "ok": True,
+        "accepted": accepted,
+        "duplicate": duplicate,
+        "status": "accepted",
+        "handoffId": handoff_id,
+        "feature": dict(feature),
     }
 
 
@@ -1207,6 +1730,7 @@ def build_parser() -> argparse.ArgumentParser:
     init_parser.add_argument("--origin", required=True)
     init_parser.add_argument("--project-id", required=True)
     init_parser.add_argument("--host-id")
+    init_parser.add_argument("--requirements-thread-id", required=True)
     init_parser.add_argument("--main-thread-id", required=True)
     init_parser.add_argument("--review-thread-id", required=True)
     init_parser.add_argument("--merge-policy", choices=("review-only", "merge-on-approve"), required=True)
@@ -1216,6 +1740,36 @@ def build_parser() -> argparse.ArgumentParser:
 
     repo_command("show", "Show validated config and state")
     repo_command("validate", "Validate config and state for the current repository")
+
+    prepare_requirements = repo_command(
+        "prepare-requirements",
+        "Prepare an idempotent confirmed RequirementsHandoff",
+    )
+    prepare_requirements.add_argument("--feature-slug", required=True)
+    prepare_requirements.add_argument("--title", required=True)
+    prepare_requirements.add_argument("--branch", required=True)
+    prepare_requirements.add_argument("--requirements-path", required=True)
+    prepare_requirements.add_argument("--requirements-commit-sha", required=True)
+    prepare_requirements.add_argument("--confirmation-evidence", required=True)
+
+    requirements_dispatched = repo_command(
+        "mark-requirements-dispatched",
+        "Mark a host-confirmed requirements handoff delivery",
+    )
+    requirements_dispatched.add_argument("--handoff-id", required=True)
+
+    requirements_delivery_failed = repo_command(
+        "mark-requirements-delivery-failed",
+        "Record a retryable requirements handoff delivery failure",
+    )
+    requirements_delivery_failed.add_argument("--handoff-id", required=True)
+    requirements_delivery_failed.add_argument("--reason", required=True)
+
+    accept_requirements = repo_command(
+        "accept-requirements",
+        "Validate and accept a confirmed RequirementsHandoff",
+    )
+    accept_requirements.add_argument("--handoff-file", required=True)
 
     prepare = repo_command("prepare-review", "Prepare an idempotent ReviewRequest")
     prepare.add_argument("--pr-number", type=int, required=True)
@@ -1263,6 +1817,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "init": command_init,
         "show": command_show,
         "validate": command_validate,
+        "prepare-requirements": command_prepare_requirements,
+        "mark-requirements-dispatched": lambda value: mutate_requirements_handoff(value, "dispatched"),
+        "mark-requirements-delivery-failed": lambda value: mutate_requirements_handoff(value, "delivery_failed"),
+        "accept-requirements": command_accept_requirements,
         "prepare-review": command_prepare_review,
         "mark-dispatched": lambda value: mutate_dispatch(value, "dispatched"),
         "mark-delivery-failed": lambda value: mutate_dispatch(value, "delivery_failed"),

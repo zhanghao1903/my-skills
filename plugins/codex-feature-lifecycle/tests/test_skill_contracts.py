@@ -28,12 +28,23 @@ class SkillContractTests(unittest.TestCase):
             self.assertIn(f"`{capability}`", text)
         self.assertIn("Default to `review-only`", text)
         self.assertIn("Do not create tasks unless the user explicitly invoked this skill", text)
-        self.assertIn("entire final", text)
-        self.assertIn("`NOT_MAIN_READY` fail", text)
+        self.assertRegex(text, r"entire\s+final response must equal")
+        self.assertIn("`NOT_REQUIREMENTS_READY`", text)
+        self.assertIn("`NOT_MAIN_READY`", text)
+        self.assertIn("`NOT_REVIEW_READY`", text)
+        self.assertIn("--requirements-thread-id", text)
+        self.assertIn("exactly three", text.lower())
 
-    def test_main_and_reviewer_preserve_role_boundary_and_exact_head_gate(self) -> None:
+    def test_role_boundaries_and_exact_head_gate(self) -> None:
+        requirements = self.read("skills/codex-requirements-intake/SKILL.md")
         main = self.read("skills/codex-feature-main/SKILL.md")
         reviewer = self.read("skills/codex-pr-review-merge/SKILL.md")
+        self.assertIn("prepare-requirements", requirements)
+        self.assertIn("send_message_to_thread", requirements)
+        self.assertIn("explicit confirmation", requirements.lower())
+        self.assertIn("Never design or implement", requirements)
+        self.assertIn("accept-requirements", main)
+        self.assertIn("config.threads.requirements", main)
         self.assertIn("send_message_to_thread", main)
         self.assertIn("prepare-review", main)
         self.assertIn("cancel-dispatch", main)
@@ -43,9 +54,10 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("Never pass `--admin` or `--auto`", reviewer)
         self.assertIn("`STALE` result with merge status `NOT_ATTEMPTED`", reviewer)
 
-    def test_only_main_role_is_implicitly_invocable(self) -> None:
+    def test_only_interactive_work_roles_are_implicitly_invocable(self) -> None:
         expected = {
             "codex-workflow-init": "false",
+            "codex-requirements-intake": "true",
             "codex-feature-main": "true",
             "codex-pr-review-merge": "false",
         }
