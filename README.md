@@ -7,6 +7,7 @@ Personal Codex plugins and skills collected in one repository.
 ```text
 plugins/
   codex-feature-lifecycle/
+  codex-engineering-lifecycle/
 skills/
   feature-lifecycle/
   local-wechat-send-smoke/
@@ -29,6 +30,7 @@ examples, or attribution files under `skills/`.
 | Plugin | Purpose |
 | --- | --- |
 | [`codex-feature-lifecycle`](plugins/codex-feature-lifecycle/README.md) | Coordinate requirements confirmation, feature implementation, independent PR review, finding remediation, re-review, and merge through three dedicated Codex tasks. |
+| [`codex-engineering-lifecycle`](plugins/codex-engineering-lifecycle/README.md) | Run the heavier requirements, technical-plan, Goal-mode implementation, independent plan/code review, merge, release, and closure workflow through three dedicated Codex tasks. |
 
 ## Skill Index
 
@@ -47,10 +49,25 @@ examples, or attribution files under `skills/`.
 
 ## Plugin Install
 
-Add this repository as a marketplace and install the plugin:
+Add this repository as a marketplace:
 
 ```bash
 codex plugin marketplace add zhanghao1903/my-skills --ref main
+```
+
+Install the heavier engineering lifecycle plugin:
+
+```bash
+codex plugin add codex-engineering-lifecycle@my-skills
+```
+
+Start a new Codex task in the target repository, then invoke
+`$engineering-workflow-init`. Init creates or binds Requirements, Engineering
+Main, and Engineering Review tasks.
+
+Install the lightweight feature lifecycle plugin:
+
+```bash
 codex plugin add codex-feature-lifecycle@my-skills
 ```
 
