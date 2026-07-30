@@ -8,7 +8,9 @@ separate hosted service.
 For each initialized repository it stores:
 
 - canonical repository and Git common-directory identity;
-- workflow, task, feature, message, GoalRun, and authorization IDs;
+- workflow, task, feature, message, GoalRun, authorization, and abandonment IDs;
+- abandonment reason, superseding feature ID, authorization source task ID,
+  and SHA-256 authorization evidence digest (not the raw authorization text);
 - role acknowledgements and configured Goal/merge/release policies;
 - lifecycle stages, queue state, paths, commit SHAs, SHA-256 digests, bounded
   titles/summaries, timestamps, and sanitized errors;

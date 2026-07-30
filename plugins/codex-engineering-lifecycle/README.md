@@ -111,6 +111,11 @@ Natural-language request
 Plan and code failures return to Main. A completed GoalRun is never reopened;
 code findings authorize a new `CODE_REMEDIATION` GoalRun. Only one GoalRun may
 be active across the workflow, so multiple features remain deterministic.
+When a user explicitly revokes a blocked objective in favor of a confirmed
+queued feature, `abandon-development` records terminal `ABANDONED` authority,
+preserves the blocked reason and all prior history, and releases the slot
+without claiming completion. The superseding feature still starts through the
+normal Goal preparation and activation flow.
 
 Review uses `codex/review-records/...` branches. They contain only review
 artifacts, are never force-pushed, and are retained as audit evidence.
@@ -125,7 +130,7 @@ configured gate passes.
 
 Main presents the exact version, tag, merge commit, target types, artifact
 names, and SHA-256 digests. The user must authorize that exact proposal.
-Supported targets in v0.1.0 are:
+Supported targets in v0.1.1 are:
 
 - GitHub Release for the bound repository;
 - PyPI or TestPyPI.
@@ -154,11 +159,11 @@ codex plugin marketplace upgrade my-skills
 codex plugin add codex-engineering-lifecycle@my-skills
 ```
 
-Local state schema v1 is migrated once, under the state lock, and atomically
-persisted as v2. This preserves pre-history release states by reconstructing a
-deterministic submission ledger. State v2 is then validated before every
-mutation; incompatible future state is rejected rather than silently
-downgraded.
+Local state schema v1 is migrated under the state lock by reconstructing its
+deterministic release submission ledger, and schema v2 is then migrated
+without semantic changes to v3. State v3 adds authorized Goal abandonment and
+is atomically persisted before use. It is validated before every mutation;
+incompatible future state is rejected rather than silently downgraded.
 
 ## Uninstall
 

@@ -1,6 +1,6 @@
 {
   "name": "codex-engineering-lifecycle",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A three-task Codex workflow for confirmed requirements, independent plan and code review, Goal-mode delivery, merge, release, and feature closure.",
   "author": {
     "name": "zhanghao1903",

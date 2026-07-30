@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.1.1 - 2026-07-30
+
+### Added
+
+- Add an explicit, Main-only `abandon-development` transition for a uniquely
+  active BLOCKED GoalRun superseded by a confirmed queued feature.
+- Record terminal `ABANDONED` / `DEVELOPMENT_ABANDONED` state with a
+  deterministic abandonment ID, authorization source, evidence digest, reason,
+  timestamp, and superseding feature ID.
+- Migrate workflow state v2 to v3 atomically while preserving existing state
+  semantics and the earlier v1 release-ledger migration.
+
+### Fixed
+
+- Release the serialized Goal slot after authorized objective revocation
+  without deleting history or fabricating `COMPLETE`, completion timestamps, or
+  usage.
+- Make abandonment replay idempotent for identical authority and reject
+  conflicting replay, wrong role/run/status, self-supersession, and missing or
+  non-queued superseding features.
+
 ## 0.1.0 - 2026-07-27
 
 ### Added

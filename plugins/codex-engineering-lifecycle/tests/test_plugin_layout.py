@@ -20,7 +20,7 @@ class PluginLayoutTests(unittest.TestCase):
             )
         )
         self.assertEqual(manifest["name"], "codex-engineering-lifecycle")
-        self.assertEqual(manifest["version"], "0.1.0")
+        self.assertEqual(manifest["version"], "0.1.1")
         entry = next(
             item for item in marketplace["plugins"] if item["name"] == manifest["name"]
         )

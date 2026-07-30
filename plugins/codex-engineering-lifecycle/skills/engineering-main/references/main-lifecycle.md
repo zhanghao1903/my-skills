@@ -10,6 +10,7 @@
 | `PLAN_APPROVED` / `DEVELOPMENT_QUEUED` | Prepare and activate initial GoalRun when slot is free |
 | `DEVELOPMENT_ACTIVE` | Continue the active Goal only |
 | `DEVELOPMENT_BLOCKED` | Wait for user/external recovery, then resume same blocked run |
+| `DEVELOPMENT_ABANDONED` | Terminal: retain authority/history and continue only through the queued superseding feature |
 | `DEVELOPMENT_COMPLETE` | Prepare exact-head code review |
 | `CODE_CHANGES_REQUESTED` | Queue a new remediation GoalRun |
 | `MERGE_READY` | Under review-only, wait for an external merge owner and Review's observed proof |
@@ -45,6 +46,15 @@ Use the same `start-development` command twice:
 
 If platform Goal creation fails, leave PREPARED and retry idempotently. Never
 create a second Goal for the same run ID.
+
+If the user explicitly revokes a blocked objective and authorizes a confirmed
+queued feature to supersede it, use `abandon-development` with the exact
+GoalRun, authorization source task, authorization evidence, reason, and
+superseding feature ID. The helper stores only the evidence digest, preserves
+the blocked reason and all prior GoalRuns, records `ABANDONED` rather than
+`COMPLETE`, and releases the global Goal slot. Never infer abandonment, apply
+it to an ACTIVE run, or restart an abandoned feature. Verify durable status
+before starting the superseding feature in a new GoalRun.
 
 ## Release target examples
 

@@ -176,6 +176,94 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
                 role,
             )
 
+    def approve_feature_plan(self, plan_sha: str) -> dict:
+        requirements = self.command(
+            "prepare-requirements",
+            "--task-id",
+            self.tasks["requirements"],
+            "--feature-id",
+            self.feature_id,
+            "--title",
+            "Sample feature",
+            "--branch",
+            self.feature_branch,
+            "--requirements-path",
+            "docs/feature/sample-feature/requirements.md",
+            "--requirements-commit-sha",
+            plan_sha,
+            "--confirmation-evidence",
+            "Test user confirmed the complete snapshot.",
+        )
+        requirements_file = self.payload_file(
+            "abandon-requirements.json", requirements["message"]
+        )
+        self.command(
+            "accept-requirements",
+            "--task-id",
+            self.tasks["main"],
+            "--payload-file",
+            str(requirements_file),
+        )
+        plan = self.command(
+            "prepare-plan-review",
+            "--task-id",
+            self.tasks["main"],
+            "--feature-id",
+            self.feature_id,
+            "--plan-commit-sha",
+            plan_sha,
+            "--requirements-path",
+            "docs/feature/sample-feature/requirements.md",
+            "--design-path",
+            "docs/feature/sample-feature/design.md",
+            "--implementation-plan-path",
+            "docs/feature/sample-feature/implementation-plan.md",
+            "--acceptance-criteria-digest",
+            "1" * 64,
+        )
+        plan_file = self.payload_file("abandon-plan-request.json", plan["message"])
+        self.command(
+            "accept-plan-review",
+            "--task-id",
+            self.tasks["review"],
+            "--payload-file",
+            str(plan_file),
+        )
+        report_branch = plan["message"]["body"]["reviewRecordBranch"]
+        report_commit, report_digest = self.add_review_report(
+            report_branch,
+            plan_sha,
+            "docs/reviews/abandon-plan.md",
+            "# Technical Plan Review\n\nDecision: Pass\n",
+        )
+        result = self.command(
+            "prepare-plan-result",
+            "--task-id",
+            self.tasks["review"],
+            "--request-file",
+            str(plan_file),
+            "--decision",
+            "PASS",
+            "--report-branch",
+            report_branch,
+            "--report-path",
+            "docs/reviews/abandon-plan.md",
+            "--report-commit-sha",
+            report_commit,
+            "--report-sha256",
+            report_digest,
+            "--summary",
+            "Plan is approved for Goal-mode implementation.",
+        )
+        result_file = self.payload_file("abandon-plan-result.json", result["message"])
+        return self.command(
+            "apply-plan-result",
+            "--task-id",
+            self.tasks["main"],
+            "--payload-file",
+            str(result_file),
+        )
+
     def add_review_report(
         self, branch: str, base_sha: str, relative: str, content: str
     ) -> tuple[str, str]:
@@ -271,6 +359,267 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
         self.assertTrue(recovered["recovered"])
         self.assertEqual(recovered["workflowId"], initialized["workflowId"])
         self.assertEqual(recovered["tasks"], self.tasks)
+
+    def test_state_v2_migrates_atomically_to_v3_without_semantic_change(self) -> None:
+        initialized = self.initialize()
+        state_path = Path(initialized["stateRoot"]) / "state.json"
+        state_v2 = json.loads(state_path.read_bytes())
+        self.assertEqual(state_v2["schemaVersion"], 3)
+        state_v2["schemaVersion"] = 2
+        state_path.write_text(json.dumps(state_v2), encoding="utf-8")
+        expected = copy.deepcopy(state_v2)
+        expected.pop("schemaVersion")
+        expected.pop("updatedAt")
+
+        status = self.command("status")
+        self.assertTrue(status["initialized"])
+        migrated = json.loads(state_path.read_bytes())
+        self.assertEqual(migrated["schemaVersion"], 3)
+        actual = copy.deepcopy(migrated)
+        actual.pop("schemaVersion")
+        actual.pop("updatedAt")
+        self.assertEqual(actual, expected)
+
+    def test_abandon_blocked_goal_is_authorized_terminal_and_idempotent(self) -> None:
+        plan_sha = self.commit_feature_documents()
+        initialized = self.initialize()
+        self.ack_all()
+        approved = self.approve_feature_plan(plan_sha)
+        self.assertEqual(approved["stage"], "DEVELOPMENT_QUEUED")
+        state_path = Path(initialized["stateRoot"]) / "state.json"
+        config_path = Path(initialized["stateRoot"]) / "config.json"
+
+        superseding_feature_id = "superseding-feature-fedcba987654"
+        queued_state = json.loads(state_path.read_bytes())
+        superseding_feature = copy.deepcopy(queued_state["features"][self.feature_id])
+        superseding_feature["featureId"] = superseding_feature_id
+        superseding_feature["title"] = "Superseding feature"
+        superseding_feature["branch"] = "codex/superseding-feature"
+        queued_state["features"][superseding_feature_id] = superseding_feature
+        queued_state["developmentQueue"].append(superseding_feature_id)
+        state_path.write_text(json.dumps(queued_state), encoding="utf-8")
+        self.command("status")
+
+        objective = "Implement the original approved feature."
+        prepared = self.command(
+            "start-development",
+            "--task-id",
+            self.tasks["main"],
+            "--feature-id",
+            self.feature_id,
+            "--objective",
+            objective,
+        )
+        goal_run_id = prepared["goalRun"]["goalRunId"]
+        self.command(
+            "start-development",
+            "--task-id",
+            self.tasks["main"],
+            "--feature-id",
+            self.feature_id,
+            "--objective",
+            objective,
+            "--activate",
+            "--goal-run-id",
+            goal_run_id,
+            "--goal-thread-id",
+            self.tasks["main"],
+        )
+
+        reason = "User superseded this GoalRun with a confirmed replacement."
+        source_thread_id = "thread-user-authorization"
+        evidence = (
+            "Authorize abandon-development for the exact blocked GoalRun "
+            "without marking it COMPLETE."
+        )
+        abandon_args = (
+            "--feature-id",
+            self.feature_id,
+            "--goal-run-id",
+            goal_run_id,
+            "--reason",
+            reason,
+            "--authorization-source-thread-id",
+            source_thread_id,
+            "--authorization-evidence",
+            evidence,
+            "--superseded-by-feature-id",
+            superseding_feature_id,
+        )
+
+        wrong_role = self.command(
+            "abandon-development",
+            "--task-id",
+            self.tasks["requirements"],
+            *abandon_args,
+            expect=2,
+        )
+        self.assertEqual(wrong_role["error"]["kind"], "task_role_mismatch")
+        active_status = self.command(
+            "abandon-development",
+            "--task-id",
+            self.tasks["main"],
+            *abandon_args,
+            expect=2,
+        )
+        self.assertEqual(active_status["error"]["kind"], "invalid_transition")
+
+        blocked_reason = "The user revoked the old implementation objective."
+        self.command(
+            "block-development",
+            "--task-id",
+            self.tasks["main"],
+            "--feature-id",
+            self.feature_id,
+            "--goal-run-id",
+            goal_run_id,
+            "--reason",
+            blocked_reason,
+        )
+        state_with_history = json.loads(state_path.read_bytes())
+        current_run = state_with_history["features"][self.feature_id]["goalRuns"][-1]
+        completed_history = copy.deepcopy(current_run)
+        completed_history.update(
+            {
+                "goalRunId": "a" * 64,
+                "authorityMessageId": "b" * 64,
+                "objectiveDigest": "c" * 64,
+                "status": "COMPLETE",
+                "completedAt": "2026-07-29T00:02:00Z",
+                "usage": {"tokensUsed": 42},
+            }
+        )
+        completed_history.pop("blockedReason")
+        state_with_history["features"][self.feature_id]["goalRuns"].insert(
+            0, completed_history
+        )
+        state_path.write_text(json.dumps(state_with_history), encoding="utf-8")
+        self.command("status")
+
+        wrong_run_args = list(abandon_args)
+        wrong_run_args[3] = "f" * 64
+        wrong_run = self.command(
+            "abandon-development",
+            "--task-id",
+            self.tasks["main"],
+            *wrong_run_args,
+            expect=2,
+        )
+        self.assertEqual(wrong_run["error"]["kind"], "invalid_transition")
+
+        missing_superseder_args = list(abandon_args)
+        missing_superseder_args[-1] = "missing-feature-aaaaaaaaaaaa"
+        missing_superseder = self.command(
+            "abandon-development",
+            "--task-id",
+            self.tasks["main"],
+            *missing_superseder_args,
+            expect=2,
+        )
+        self.assertEqual(missing_superseder["error"]["kind"], "invalid_transition")
+
+        before = json.loads(state_path.read_bytes())
+        config_before = config_path.read_bytes()
+        queue_before = copy.deepcopy(before["developmentQueue"])
+        dispatches_before = copy.deepcopy(before["dispatches"])
+        superseding_before = copy.deepcopy(before["features"][superseding_feature_id])
+        history_before = copy.deepcopy(
+            before["features"][self.feature_id]["goalRuns"][0]
+        )
+        target_before = copy.deepcopy(
+            before["features"][self.feature_id]["goalRuns"][-1]
+        )
+
+        abandoned = self.command(
+            "abandon-development",
+            "--task-id",
+            self.tasks["main"],
+            *abandon_args,
+        )
+        self.assertFalse(abandoned["duplicate"])
+        self.assertEqual(abandoned["stage"], "DEVELOPMENT_ABANDONED")
+        self.assertIsNone(abandoned["activeGoal"])
+
+        after = json.loads(state_path.read_bytes())
+        target_after = after["features"][self.feature_id]["goalRuns"][-1]
+        self.assertEqual(target_after["status"], "ABANDONED")
+        self.assertEqual(target_after["blockedReason"], blocked_reason)
+        self.assertNotIn("completedAt", target_after)
+        self.assertNotIn("usage", target_after)
+        for key, value in target_before.items():
+            if key != "status":
+                self.assertEqual(target_after[key], value)
+        abandonment = target_after["abandonment"]
+        evidence_digest = hashlib.sha256(evidence.encode("utf-8")).hexdigest()
+        expected_authority = {
+            "goalRunId": goal_run_id,
+            "kind": "SUPERSEDED",
+            "reason": reason,
+            "authorizationSourceThreadId": source_thread_id,
+            "authorizationEvidenceDigest": evidence_digest,
+            "supersededByFeatureId": superseding_feature_id,
+        }
+        self.assertEqual(
+            abandonment["abandonmentId"],
+            WORKFLOW_MODULE.digest(expected_authority),
+        )
+        self.assertEqual(abandonment["authorizationEvidenceDigest"], evidence_digest)
+        self.assertEqual(abandonment["supersededByFeatureId"], superseding_feature_id)
+        self.assertNotIn(evidence, state_path.read_text(encoding="utf-8"))
+        self.assertIsNone(after["activeGoal"])
+        self.assertEqual(after["developmentQueue"], queue_before)
+        self.assertEqual(after["dispatches"], dispatches_before)
+        self.assertEqual(after["features"][superseding_feature_id], superseding_before)
+        self.assertEqual(
+            after["features"][self.feature_id]["goalRuns"][0], history_before
+        )
+        self.assertEqual(config_path.read_bytes(), config_before)
+
+        after_bytes = state_path.read_bytes()
+        duplicate = self.command(
+            "abandon-development",
+            "--task-id",
+            self.tasks["main"],
+            *abandon_args,
+        )
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(state_path.read_bytes(), after_bytes)
+
+        conflicting_args = list(abandon_args)
+        conflicting_args[5] = "A different abandonment reason."
+        conflict = self.command(
+            "abandon-development",
+            "--task-id",
+            self.tasks["main"],
+            *conflicting_args,
+            expect=2,
+        )
+        self.assertEqual(conflict["error"]["kind"], "replay_conflict")
+        self.assertEqual(state_path.read_bytes(), after_bytes)
+
+        status = self.command("status", "--task-id", self.tasks["main"])
+        status_run = status["features"][self.feature_id]["goalRuns"][-1]
+        self.assertEqual(status_run["status"], "ABANDONED")
+        self.assertEqual(status_run["abandonment"], abandonment)
+
+        invalid_active = copy.deepcopy(after)
+        invalid_active["activeGoal"] = {
+            "featureId": self.feature_id,
+            "goalRunId": goal_run_id,
+        }
+        state_path.write_text(json.dumps(invalid_active), encoding="utf-8")
+        validator_error = self.command("status", expect=2)
+        self.assertEqual(validator_error["error"]["kind"], "invalid_state")
+        state_path.write_bytes(after_bytes)
+
+        invalid_completion = copy.deepcopy(after)
+        invalid_completion["features"][self.feature_id]["goalRuns"][-1]["usage"] = {
+            "tokensUsed": 1
+        }
+        state_path.write_text(json.dumps(invalid_completion), encoding="utf-8")
+        completion_error = self.command("status", expect=2)
+        self.assertEqual(completion_error["error"]["kind"], "invalid_state")
+        state_path.write_bytes(after_bytes)
 
     def test_requirements_requires_deterministic_pushed_current_snapshot(self) -> None:
         first_commit = self.commit_feature_documents()
@@ -1235,7 +1584,7 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
             migrated_status["features"][self.feature_id]["stage"], "RELEASED"
         )
         migrated_state = json.loads(state_path.read_bytes())
-        self.assertEqual(migrated_state["schemaVersion"], 2)
+        self.assertEqual(migrated_state["schemaVersion"], 3)
         self.assertEqual(
             len(migrated_state["features"][self.feature_id]["release"]["submissions"]),
             2,
