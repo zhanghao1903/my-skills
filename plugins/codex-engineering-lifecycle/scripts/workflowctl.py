@@ -22,7 +22,7 @@ from typing import Any
 from urllib.parse import unquote, urlsplit
 
 SCHEMA_VERSION = 1
-STATE_SCHEMA_VERSION = 3
+STATE_SCHEMA_VERSION = 4
 ROLES = ("requirements", "main", "review")
 MERGE_MODES = ("review-only", "merge-on-approve")
 MERGE_METHODS = ("squash", "merge", "rebase")
@@ -45,6 +45,7 @@ STAGES = {
     "RELEASE_AUTHORIZED",
     "RELEASE_FAILED",
     "RELEASED",
+    "ACCEPTED_NO_PUBLISH",
     "CLOSED",
 }
 MESSAGE_TYPES = {
@@ -623,6 +624,75 @@ def validate_goal_run(value: Any, field: str) -> dict[str, Any]:
     return run
 
 
+def validate_no_publish_acceptance(
+    value: Any,
+    field: str,
+    feature_id: str,
+    config: Mapping[str, Any],
+) -> dict[str, Any]:
+    acceptance = exact_keys(
+        value,
+        field,
+        {
+            "acceptanceId",
+            "kind",
+            "publication",
+            "workflowId",
+            "featureId",
+            "mergeCommitSha",
+            "reason",
+            "authorizedBy",
+            "authorizationSourceThreadId",
+            "authorizationEvidenceDigest",
+            "acceptedAt",
+        },
+    )
+    if acceptance["kind"] != "ACCEPTANCE_ONLY":
+        raise WorkflowError("invalid_state", f"{field}.kind is unsupported")
+    if acceptance["publication"] != "NO_PUBLISH":
+        raise WorkflowError("invalid_state", f"{field}.publication is unsupported")
+    if (
+        acceptance["workflowId"] != config["workflowId"]
+        or acceptance["featureId"] != feature_id
+    ):
+        raise WorkflowError("invalid_state", f"{field} is misbound")
+    merge_commit_sha = require_sha(
+        acceptance["mergeCommitSha"], f"{field}.mergeCommitSha"
+    )
+    reason = require_string(acceptance["reason"], f"{field}.reason", maximum=300)
+    authorized_by = require_string(
+        acceptance["authorizedBy"], f"{field}.authorizedBy", maximum=200
+    )
+    source_thread_id = require_string(
+        acceptance["authorizationSourceThreadId"],
+        f"{field}.authorizationSourceThreadId",
+        maximum=200,
+    )
+    evidence_digest = require_digest(
+        acceptance["authorizationEvidenceDigest"],
+        f"{field}.authorizationEvidenceDigest",
+    )
+    require_timestamp(acceptance["acceptedAt"], f"{field}.acceptedAt")
+    authority = {
+        "kind": "ACCEPTANCE_ONLY",
+        "publication": "NO_PUBLISH",
+        "workflowId": config["workflowId"],
+        "featureId": feature_id,
+        "mergeCommitSha": merge_commit_sha,
+        "reason": reason,
+        "authorizedBy": authorized_by,
+        "authorizationSourceThreadId": source_thread_id,
+        "authorizationEvidenceDigest": evidence_digest,
+    }
+    if require_digest(
+        acceptance["acceptanceId"], f"{field}.acceptanceId"
+    ) != digest(authority):
+        raise WorkflowError(
+            "invalid_state", f"{field}.acceptanceId does not match its authority"
+        )
+    return acceptance
+
+
 def validate_feature_record(
     value: Any,
     feature_id: str,
@@ -656,6 +726,7 @@ def validate_feature_record(
             "codeResultMessageId",
             "merge",
             "release",
+            "noPublishAcceptance",
             "closure",
         },
     )
@@ -723,9 +794,11 @@ def validate_feature_record(
         "RELEASE_AUTHORIZED",
         "RELEASE_FAILED",
         "RELEASED",
+        "ACCEPTED_NO_PUBLISH",
         "CLOSED",
     }
     release_stages = {"RELEASE_AUTHORIZED", "RELEASE_FAILED", "RELEASED", "CLOSED"}
+    no_publish_stages = {"ACCEPTED_NO_PUBLISH", "CLOSED"}
     if "merge" in feature and stage not in merge_stages:
         raise WorkflowError(
             "invalid_state", f"{field} contains merge proof outside merge stages"
@@ -734,11 +807,35 @@ def validate_feature_record(
         raise WorkflowError(
             "invalid_state", f"{field} contains release proof outside release stages"
         )
+    if "noPublishAcceptance" in feature and stage not in no_publish_stages:
+        raise WorkflowError(
+            "invalid_state",
+            f"{field} contains no-publish acceptance outside accepted stages",
+        )
+    if "release" in feature and "noPublishAcceptance" in feature:
+        raise WorkflowError(
+            "invalid_state", f"{field} contains conflicting completion authority"
+        )
     if "closure" in feature and stage != "CLOSED":
         raise WorkflowError(
             "invalid_state", f"{field} contains closure proof before CLOSED"
         )
     release_result: dict[str, Any] | None = None
+    no_publish_acceptance: dict[str, Any] | None = None
+    if "noPublishAcceptance" in feature:
+        no_publish_acceptance = validate_no_publish_acceptance(
+            feature["noPublishAcceptance"],
+            f"{field}.noPublishAcceptance",
+            feature_id,
+            config,
+        )
+        if (
+            no_publish_acceptance["mergeCommitSha"]
+            != feature.get("merge", {}).get("mergeCommitSha")
+        ):
+            raise WorkflowError(
+                "invalid_state", f"{field}.noPublishAcceptance merge is misbound"
+            )
     if "release" in feature:
         release = exact_keys(
             feature["release"],
@@ -963,12 +1060,7 @@ def validate_feature_record(
             )
     if "closure" in feature:
         closure = validate_closure_shape(feature["closure"])
-        expected_release_targets = (
-            [item["targetId"] for item in release_result["targets"]]
-            if release_result
-            else []
-        )
-        if (
+        common_mismatch = (
             closure["requirementsMessageId"] != feature.get("requirementsMessageId")
             or closure["planReviewResultMessageId"]
             != feature.get("planResultMessageId")
@@ -976,11 +1068,29 @@ def validate_feature_record(
             != feature.get("codeResultMessageId")
             or closure["mergeCommitSha"]
             != feature.get("merge", {}).get("mergeCommitSha")
-            or closure["releaseResultId"]
-            != feature.get("release", {}).get("result", {}).get("proofDigest")
-            or closure["releaseTargets"] != expected_release_targets
-        ):
+        )
+        if common_mismatch:
             raise WorkflowError("invalid_state", f"{field}.closure is misbound")
+        if no_publish_acceptance:
+            if (
+                closure.get("disposition") != "ACCEPTED_NO_PUBLISH"
+                or closure.get("acceptanceId")
+                != no_publish_acceptance["acceptanceId"]
+                or closure["releaseTargets"] != []
+            ):
+                raise WorkflowError("invalid_state", f"{field}.closure is misbound")
+        else:
+            expected_release_targets = (
+                [item["targetId"] for item in release_result["targets"]]
+                if release_result
+                else []
+            )
+            if (
+                closure.get("releaseResultId")
+                != feature.get("release", {}).get("result", {}).get("proofDigest")
+                or closure["releaseTargets"] != expected_release_targets
+            ):
+                raise WorkflowError("invalid_state", f"{field}.closure is misbound")
 
     plan_required = {
         "PLAN_REVIEW_PENDING",
@@ -999,6 +1109,7 @@ def validate_feature_record(
         "RELEASE_AUTHORIZED",
         "RELEASE_FAILED",
         "RELEASED",
+        "ACCEPTED_NO_PUBLISH",
         "CLOSED",
     }
     plan_result_required = plan_required - {"PLAN_REVIEW_PENDING"}
@@ -1011,6 +1122,7 @@ def validate_feature_record(
         "RELEASE_AUTHORIZED",
         "RELEASE_FAILED",
         "RELEASED",
+        "ACCEPTED_NO_PUBLISH",
         "CLOSED",
     }
     merge_required = {
@@ -1019,9 +1131,10 @@ def validate_feature_record(
         "RELEASE_AUTHORIZED",
         "RELEASE_FAILED",
         "RELEASED",
+        "ACCEPTED_NO_PUBLISH",
         "CLOSED",
     }
-    release_required = {"RELEASE_AUTHORIZED", "RELEASE_FAILED", "RELEASED", "CLOSED"}
+    release_required = {"RELEASE_AUTHORIZED", "RELEASE_FAILED", "RELEASED"}
     if stage != "REQUIREMENTS_CONFIRMED" and (
         "requirementsAcceptedAt" not in feature
         or "requirementsMessageId" not in feature
@@ -1044,13 +1157,29 @@ def validate_feature_record(
         raise WorkflowError("invalid_state", f"{field} lacks merge proof")
     if stage in release_required and "release" not in feature:
         raise WorkflowError("invalid_state", f"{field} lacks release authorization")
-    if stage in {"RELEASED", "CLOSED"} and (
+    if stage == "RELEASED" and (
         not release_result
         or not all(item["status"] == "PUBLISHED" for item in release_result["targets"])
     ):
         raise WorkflowError(
             "invalid_state", f"{field} lacks all-target release success"
         )
+    if stage == "ACCEPTED_NO_PUBLISH" and not no_publish_acceptance:
+        raise WorkflowError(
+            "invalid_state", f"{field} lacks no-publish acceptance authority"
+        )
+    if stage == "CLOSED":
+        release_complete = bool(
+            release_result
+            and all(
+                item["status"] == "PUBLISHED" for item in release_result["targets"]
+            )
+        )
+        if release_complete == bool(no_publish_acceptance):
+            raise WorkflowError(
+                "invalid_state",
+                f"{field} must have exactly one completed delivery disposition",
+            )
     if stage == "CLOSED" and "closure" not in feature:
         raise WorkflowError("invalid_state", f"{field} lacks closure proof")
     return feature
@@ -1350,6 +1479,17 @@ def migrate_state_v2(value: Any) -> tuple[dict[str, Any], bool]:
     if not isinstance(version, int) or isinstance(version, bool) or version != 2:
         return dict(state), False
     migrated = require_object(json.loads(canonical_json(state)), "state")
+    migrated["schemaVersion"] = 3
+    migrated["updatedAt"] = utc_now()
+    return migrated, True
+
+
+def migrate_state_v3(value: Any) -> tuple[dict[str, Any], bool]:
+    state = require_object(value, "state")
+    version = state.get("schemaVersion")
+    if not isinstance(version, int) or isinstance(version, bool) or version != 3:
+        return dict(state), False
+    migrated = require_object(json.loads(canonical_json(state)), "state")
     migrated["schemaVersion"] = STATE_SCHEMA_VERSION
     migrated["updatedAt"] = utc_now()
     return migrated, True
@@ -1358,7 +1498,8 @@ def migrate_state_v2(value: Any) -> tuple[dict[str, Any], bool]:
 def migrate_state(value: Any) -> tuple[dict[str, Any], bool]:
     state, migrated_v1 = migrate_state_v1(value)
     state, migrated_v2 = migrate_state_v2(state)
-    return state, migrated_v1 or migrated_v2
+    state, migrated_v3 = migrate_state_v3(state)
+    return state, migrated_v1 or migrated_v2 or migrated_v3
 
 
 def load_state_locked(
@@ -2034,32 +2175,50 @@ def validate_release_result_shape(value: Any) -> dict[str, Any]:
 
 
 def validate_closure_shape(value: Any) -> dict[str, Any]:
-    closure = exact_keys(
-        value,
-        "ClosureRecord",
-        {
-            "releaseResultId",
-            "requirementsMessageId",
-            "planReviewResultMessageId",
-            "codeReviewResultMessageId",
-            "mergeCommitSha",
-            "releaseTargets",
-            "scenariosSolved",
-            "followUps",
-            "closedAt",
-            "closureId",
-        },
-    )
+    common = {
+        "requirementsMessageId",
+        "planReviewResultMessageId",
+        "codeReviewResultMessageId",
+        "mergeCommitSha",
+        "releaseTargets",
+        "scenariosSolved",
+        "followUps",
+        "closedAt",
+        "closureId",
+    }
+    raw = require_object(value, "ClosureRecord")
+    if raw.get("disposition") == "ACCEPTED_NO_PUBLISH":
+        closure = exact_keys(
+            raw,
+            "ClosureRecord",
+            common | {"disposition", "acceptanceId"},
+        )
+        require_digest(closure["acceptanceId"], "acceptanceId")
+        if closure["releaseTargets"] != []:
+            raise WorkflowError(
+                "invalid_payload",
+                "ACCEPTED_NO_PUBLISH closure must have no release targets",
+            )
+    else:
+        closure = exact_keys(
+            raw,
+            "ClosureRecord",
+            common | {"releaseResultId"},
+        )
+        require_digest(closure["releaseResultId"], "releaseResultId")
     for name in (
-        "releaseResultId",
         "requirementsMessageId",
         "planReviewResultMessageId",
         "codeReviewResultMessageId",
     ):
         require_digest(closure[name], name)
     require_sha(closure["mergeCommitSha"], "mergeCommitSha")
-    if not isinstance(closure["releaseTargets"], list) or not closure["releaseTargets"]:
-        raise WorkflowError("invalid_payload", "releaseTargets must be non-empty")
+    if not isinstance(closure["releaseTargets"], list):
+        raise WorkflowError("invalid_payload", "releaseTargets must be an array")
+    if "releaseResultId" in closure and not closure["releaseTargets"]:
+        raise WorkflowError(
+            "invalid_payload", "Released closure targets must be non-empty"
+        )
     if len(set(closure["releaseTargets"])) != len(closure["releaseTargets"]):
         raise WorkflowError("invalid_payload", "releaseTargets must be unique")
     for index, target_id in enumerate(closure["releaseTargets"]):
@@ -3969,6 +4128,93 @@ def normalize_target(value: Any, field: str, repository_key: str) -> dict[str, A
     return {"targetId": target_id, **normalized}
 
 
+def no_publish_acceptance_authority(
+    args: argparse.Namespace,
+    config: Mapping[str, Any],
+) -> dict[str, str]:
+    evidence = require_string(
+        args.authorization_evidence,
+        "authorizationEvidence",
+        maximum=4000,
+    )
+    return {
+        "kind": "ACCEPTANCE_ONLY",
+        "publication": "NO_PUBLISH",
+        "workflowId": config["workflowId"],
+        "featureId": require_feature_id(args.feature_id),
+        "mergeCommitSha": require_sha(args.merge_commit_sha, "mergeCommitSha"),
+        "reason": require_string(args.reason, "reason", maximum=300),
+        "authorizedBy": require_string(
+            args.authorized_by, "authorizedBy", maximum=200
+        ),
+        "authorizationSourceThreadId": require_string(
+            args.authorization_source_thread_id,
+            "authorizationSourceThreadId",
+            maximum=200,
+        ),
+        "authorizationEvidenceDigest": hashlib.sha256(
+            evidence.encode("utf-8")
+        ).hexdigest(),
+    }
+
+
+def command_record_no_publish_acceptance(
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    _, paths, config, _ = load_context(args.repo)
+    require_role(config, args.task_id, "main")
+    authority = no_publish_acceptance_authority(args, config)
+    acceptance_id = digest(authority)
+    with locked(paths["lock"]):
+        state = validate_state(load_json(paths["state"], "state"), config)
+        feature = feature_for(state, authority["featureId"])
+        existing = feature.get("noPublishAcceptance")
+        if existing:
+            if existing.get("acceptanceId") != acceptance_id:
+                raise WorkflowError(
+                    "replay_conflict",
+                    "Feature has different no-publish acceptance authority",
+                )
+            return {
+                "ok": True,
+                "duplicate": True,
+                "acceptance": existing,
+                "stage": feature["stage"],
+            }
+        if feature["stage"] != "RELEASE_AWAITING_AUTHORIZATION":
+            raise WorkflowError(
+                "invalid_transition",
+                "Feature is not awaiting release or no-publish authorization",
+            )
+        if feature.get("release"):
+            raise WorkflowError(
+                "invalid_transition",
+                "Feature already contains release authorization",
+            )
+        if (
+            feature.get("merge", {}).get("mergeCommitSha")
+            != authority["mergeCommitSha"]
+        ):
+            raise WorkflowError(
+                "snapshot_mismatch",
+                "No-publish acceptance merge commit differs",
+            )
+        acceptance = {
+            **authority,
+            "acceptanceId": acceptance_id,
+            "acceptedAt": utc_now(),
+        }
+        feature["noPublishAcceptance"] = acceptance
+        touch(feature, "ACCEPTED_NO_PUBLISH")
+        save_state(paths, state, config)
+    return {
+        "ok": True,
+        "duplicate": False,
+        "acceptance": acceptance,
+        "stage": feature["stage"],
+    }
+
+
 def command_record_release_authorization(args: argparse.Namespace) -> dict[str, Any]:
     _, paths, config, _ = load_context(args.repo)
     require_role(config, args.task_id, "main")
@@ -4509,29 +4755,23 @@ def command_close_feature(args: argparse.Namespace) -> dict[str, Any]:
     with locked(paths["lock"]):
         state = validate_state(load_json(paths["state"], "state"), config)
         feature = feature_for(state, args.feature_id)
-        if feature["stage"] != "RELEASED":
-            if feature["stage"] == "CLOSED":
-                return {
-                    "ok": True,
-                    "duplicate": True,
-                    "closure": feature["closure"],
-                    "stage": "CLOSED",
-                }
+        if feature["stage"] == "CLOSED":
+            return {
+                "ok": True,
+                "duplicate": True,
+                "closure": feature["closure"],
+                "stage": "CLOSED",
+            }
+        if feature["stage"] not in {"RELEASED", "ACCEPTED_NO_PUBLISH"}:
             raise WorkflowError(
-                "invalid_transition", "Feature cannot close before successful release"
+                "invalid_transition",
+                "Feature cannot close before release or no-publish acceptance",
             )
-        release = feature["release"]["result"]
-        if not all(item["status"] == "PUBLISHED" for item in release["targets"]):
-            raise WorkflowError(
-                "invalid_transition", "Every release target must be PUBLISHED"
-            )
-        closure = {
-            "releaseResultId": release["proofDigest"],
+        closure: dict[str, Any] = {
             "requirementsMessageId": feature.get("requirementsMessageId", ""),
             "planReviewResultMessageId": feature.get("planResultMessageId", ""),
             "codeReviewResultMessageId": feature.get("codeResultMessageId", ""),
             "mergeCommitSha": feature["merge"]["mergeCommitSha"],
-            "releaseTargets": [item["targetId"] for item in release["targets"]],
             "scenariosSolved": [
                 require_string(item, "scenario", maximum=300) for item in args.scenario
             ],
@@ -4540,6 +4780,29 @@ def command_close_feature(args: argparse.Namespace) -> dict[str, Any]:
             ],
             "closedAt": utc_now(),
         }
+        if feature["stage"] == "RELEASED":
+            release = feature["release"]["result"]
+            if not all(item["status"] == "PUBLISHED" for item in release["targets"]):
+                raise WorkflowError(
+                    "invalid_transition", "Every release target must be PUBLISHED"
+                )
+            closure.update(
+                {
+                    "releaseResultId": release["proofDigest"],
+                    "releaseTargets": [
+                        item["targetId"] for item in release["targets"]
+                    ],
+                }
+            )
+        else:
+            acceptance = feature["noPublishAcceptance"]
+            closure.update(
+                {
+                    "disposition": "ACCEPTED_NO_PUBLISH",
+                    "acceptanceId": acceptance["acceptanceId"],
+                    "releaseTargets": [],
+                }
+            )
         for name in ("planReviewResultMessageId", "codeReviewResultMessageId"):
             require_digest(closure[name], name)
         require_digest(closure["requirementsMessageId"], "requirementsMessageId")
@@ -4713,6 +4976,17 @@ def build_parser() -> argparse.ArgumentParser:
     apply_code = add_repo("apply-code-result", "Apply code review result")
     apply_code.add_argument("--payload-file", required=True)
 
+    no_publish = add_repo(
+        "record-no-publish-acceptance",
+        "Record explicit acceptance-only authority without publication",
+    )
+    no_publish.add_argument("--feature-id", required=True)
+    no_publish.add_argument("--merge-commit-sha", required=True)
+    no_publish.add_argument("--reason", required=True)
+    no_publish.add_argument("--authorized-by", required=True)
+    no_publish.add_argument("--authorization-source-thread-id", required=True)
+    no_publish.add_argument("--authorization-evidence", required=True)
+
     auth = add_repo(
         "record-release-authorization", "Record exact release authorization"
     )
@@ -4761,6 +5035,7 @@ def main() -> int:
         "accept-code-review": command_accept_code_review,
         "prepare-code-result": command_prepare_code_result,
         "apply-code-result": command_apply_code_result,
+        "record-no-publish-acceptance": command_record_no_publish_acceptance,
         "record-release-authorization": command_record_release_authorization,
         "record-release-result": command_record_release_result,
         "close-feature": command_close_feature,

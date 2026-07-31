@@ -4,19 +4,33 @@
   "title": "ClosureRecord",
   "type": "object",
   "additionalProperties": false,
-  "required": ["releaseResultId", "requirementsMessageId", "planReviewResultMessageId", "codeReviewResultMessageId", "mergeCommitSha", "releaseTargets", "scenariosSolved", "followUps", "closedAt", "closureId"],
+  "required": ["requirementsMessageId", "planReviewResultMessageId", "codeReviewResultMessageId", "mergeCommitSha", "releaseTargets", "scenariosSolved", "followUps", "closedAt", "closureId"],
   "properties": {
+    "disposition": {"const": "ACCEPTED_NO_PUBLISH"},
+    "acceptanceId": {"$ref": "#/$defs/digest"},
     "releaseResultId": {"$ref": "#/$defs/digest"},
     "requirementsMessageId": {"$ref": "#/$defs/digest"},
     "planReviewResultMessageId": {"$ref": "#/$defs/digest"},
     "codeReviewResultMessageId": {"$ref": "#/$defs/digest"},
     "mergeCommitSha": {"$ref": "#/$defs/sha"},
-    "releaseTargets": {"type": "array", "minItems": 1, "maxItems": 20, "uniqueItems": true, "items": {"$ref": "#/$defs/digest"}},
+    "releaseTargets": {"type": "array", "maxItems": 20, "uniqueItems": true, "items": {"$ref": "#/$defs/digest"}},
     "scenariosSolved": {"type": "array", "minItems": 1, "maxItems": 100, "items": {"type": "string", "minLength": 1, "maxLength": 300}},
     "followUps": {"type": "array", "maxItems": 100, "items": {"type": "string", "minLength": 1, "maxLength": 300}},
     "closedAt": {"$ref": "#/$defs/timestamp"},
     "closureId": {"$ref": "#/$defs/digest"}
   },
+  "oneOf": [
+    {
+      "required": ["releaseResultId"],
+      "not": {"anyOf": [{"required": ["disposition"]}, {"required": ["acceptanceId"]}]},
+      "properties": {"releaseTargets": {"minItems": 1}}
+    },
+    {
+      "required": ["disposition", "acceptanceId"],
+      "not": {"required": ["releaseResultId"]},
+      "properties": {"releaseTargets": {"maxItems": 0}}
+    }
+  ],
   "$defs": {
     "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},

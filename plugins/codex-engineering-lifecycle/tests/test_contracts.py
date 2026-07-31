@@ -69,7 +69,7 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout)
         self.assertTrue(report["ok"])
-        self.assertEqual(report["fixtures"], 16)
+        self.assertEqual(report["fixtures"], 17)
         self.assertEqual(report["failures"], 0)
 
     def test_message_retry_reuses_original_timestamp_and_payload(self) -> None:

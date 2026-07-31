@@ -1,7 +1,7 @@
 {
   "name": "codex-engineering-lifecycle",
-  "version": "0.1.1",
-  "description": "A three-task Codex workflow for confirmed requirements, independent plan and code review, Goal-mode delivery, merge, release, and feature closure.",
+  "version": "0.1.2",
+  "description": "A three-task Codex workflow for confirmed requirements, independent plan and code review, Goal-mode delivery, merge, release or no-publish acceptance, and feature closure.",
   "author": {
     "name": "zhanghao1903",
     "url": "https://github.com/zhanghao1903"
@@ -20,14 +20,14 @@
   "interface": {
     "displayName": "Codex Engineering Lifecycle",
     "shortDescription": "Three-task feature delivery with independent review.",
-    "longDescription": "Initialize Requirements, Engineering Main, and Engineering Review tasks, then carry an immutable feature through confirmation, technical-plan review, serialized Goal-mode development, exact-head code review, merge, explicit release authorization, and auditable closure.",
+    "longDescription": "Initialize Requirements, Engineering Main, and Engineering Review tasks, then carry an immutable feature through confirmation, technical-plan review, serialized Goal-mode development, exact-head code review, merge, explicit release or no-publish acceptance authorization, and auditable closure.",
     "developerName": "zhanghao1903",
     "category": "Productivity",
     "capabilities": [
       "Requirements",
       "Goal workflow",
       "Plan and code review",
-      "Release governance"
+      "Release and acceptance governance"
     ],
     "websiteURL": "https://github.com/zhanghao1903/my-skills/tree/main/plugins/codex-engineering-lifecycle",
     "privacyPolicyURL": "https://github.com/zhanghao1903/my-skills/blob/main/plugins/codex-engineering-lifecycle/PRIVACY.md",

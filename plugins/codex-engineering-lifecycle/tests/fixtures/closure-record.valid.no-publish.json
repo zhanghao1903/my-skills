@@ -1,0 +1,17 @@
+{
+  "disposition": "ACCEPTED_NO_PUBLISH",
+  "acceptanceId": "9999999999999999999999999999999999999999999999999999999999999999",
+  "requirementsMessageId": "8d5cfe5f673fd024c1f6a591385865ed0868dfe5db2ec62566006b1ed152f71a",
+  "planReviewResultMessageId": "cc5a31d17d1588614817a09001d4fff49b96b121e20328ffefb7e85cee36f904",
+  "codeReviewResultMessageId": "ea3fe035fd45fa5a80fa1d7345bbab29bd815d93689d370a139139bc72f341a7",
+  "mergeCommitSha": "dddddddddddddddddddddddddddddddddddddddd",
+  "releaseTargets": [],
+  "scenariosSolved": [
+    "A merged feature is formally accepted without publication."
+  ],
+  "followUps": [
+    "Begin the next independently accepted feature."
+  ],
+  "closedAt": "2026-07-31T00:30:00Z",
+  "closureId": "17fb6959582fb9f71125c6b57c096403f658098e81b2c76e39c0ace2c277d692"
+}
