@@ -1,0 +1,40 @@
+{
+  "name": "idea-validation-workflow",
+  "version": "0.1.0",
+  "description": "A client-neutral Codex workflow for safely capturing, clarifying, promoting, executing, and reviewing Ideas through an IdeaTrace API.",
+  "author": {
+    "name": "zhanghao1903",
+    "url": "https://github.com/zhanghao1903"
+  },
+  "homepage": "https://github.com/zhanghao1903/my-skills/tree/main/plugins/idea-validation-workflow",
+  "repository": "https://github.com/zhanghao1903/my-skills",
+  "keywords": [
+    "codex",
+    "idea-validation",
+    "product-discovery",
+    "evidence",
+    "workflow"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Idea Validation Workflow",
+    "shortDescription": "Turn natural-language Ideas into verified API workflows.",
+    "longDescription": "Guide proposers and executors through Idea capture, bounded clarification, explicit promotion, execution facts, structured reports, idempotent recovery, role-oriented reads, and human-governed handoff without creating a second source of truth.",
+    "developerName": "zhanghao1903",
+    "category": "Productivity",
+    "capabilities": [
+      "Idea capture",
+      "Clarification and promotion",
+      "Execution facts",
+      "Structured reports",
+      "Human-governed handoff"
+    ],
+    "websiteURL": "https://github.com/zhanghao1903/my-skills/tree/main/plugins/idea-validation-workflow",
+    "defaultPrompt": [
+      "Use $idea-validation-workflow to capture this Idea without promoting it.",
+      "Use $idea-validation-workflow to clarify this Idea from current public authority.",
+      "Use $idea-validation-workflow to read this project and summarize the next allowed step."
+    ],
+    "brandColor": "#2F6B5F"
+  }
+}
