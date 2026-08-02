@@ -1,9 +1,9 @@
 # Idea Validation Workflow
 
-Idea Validation Workflow is a client-neutral Codex plugin for proposers and
-executors using an IdeaTrace LP-03-compatible API. It turns natural-language
-intent into bounded, verified API actions while keeping the server as the only
-business authority.
+Idea Validation Workflow is a client-neutral workflow plugin for Codex and
+Claude Code. It supports proposers and executors using an IdeaTrace
+LP-03-compatible API, turning natural-language intent into bounded, verified
+API actions while keeping the server as the only business authority.
 
 The plugin covers:
 
@@ -18,7 +18,7 @@ The plugin covers:
 It does not include or deploy an IdeaTrace server, store a second copy of
 project state, or provide credentials.
 
-## Install from GitHub
+## Install in Codex
 
 Add this repository as a marketplace and install the plugin:
 
@@ -40,6 +40,27 @@ Verify discovery with:
 ```bash
 codex plugin list --marketplace my-skills
 ```
+
+## Install in Claude Code
+
+From Claude Code, add this GitHub repository as a marketplace and install the
+same plugin:
+
+```text
+/plugin marketplace add zhanghao1903/my-skills
+/plugin install idea-validation-workflow@my-skills
+/reload-plugins
+```
+
+Invoke the namespaced Skill directly with:
+
+```text
+/idea-validation-workflow:idea-validation-workflow
+```
+
+Claude Code also discovers the Skill automatically when a request matches its
+description. The Claude package uses `.claude-plugin` manifests; it shares the
+same `SKILL.md`, references, and structured-report schema as the Codex package.
 
 The source can also be browsed at
 [GitHub](https://github.com/zhanghao1903/my-skills/tree/main/plugins/idea-validation-workflow)
@@ -71,7 +92,8 @@ before relying on its write contract.
 
 ## Compatibility baseline
 
-Version `0.1.0` is packaged from the reviewed IdeaTrace source snapshot
+Version `0.1.0` supports both Codex and Claude Code and is packaged from the
+reviewed IdeaTrace source snapshot
 `f377801442cf1cfb268b5dd830f5d20e95ce18c0`. The plugin ships the canonical
 structured-report schema and links the exact OpenAPI snapshot while treating
 the configured server's live contract as runtime authority.

@@ -1,7 +1,7 @@
 {
   "name": "idea-validation-workflow",
   "version": "0.1.0",
-  "description": "A client-neutral Codex workflow for safely capturing, clarifying, promoting, executing, and reviewing Ideas through an IdeaTrace API.",
+  "description": "A client-neutral workflow for safely capturing, clarifying, promoting, executing, and reviewing Ideas through an IdeaTrace API.",
   "author": {
     "name": "zhanghao1903",
     "url": "https://github.com/zhanghao1903"

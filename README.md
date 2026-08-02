@@ -89,6 +89,18 @@ IdeaTrace-compatible API base URL and AI bearer credential, then invoke
 `$idea-validation-workflow` with the proposer's natural-language Idea or the
 executor's project update.
 
+The same plugin is available in Claude Code through its native marketplace:
+
+```text
+/plugin marketplace add zhanghao1903/my-skills
+/plugin install idea-validation-workflow@my-skills
+/reload-plugins
+```
+
+Invoke it as `/idea-validation-workflow:idea-validation-workflow`. Codex and
+Claude Code load the same Skill files; only their marketplace manifests and
+invocation syntax differ.
+
 ## Local Install
 
 Copy or symlink a skill directory into your Codex skills directory:

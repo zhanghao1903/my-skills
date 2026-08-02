@@ -1,0 +1,15 @@
+{
+  "name": "my-skills",
+  "owner": {
+    "name": "zhanghao1903",
+    "url": "https://github.com/zhanghao1903"
+  },
+  "description": "Claude Code plugins published by zhanghao1903.",
+  "plugins": [
+    {
+      "name": "idea-validation-workflow",
+      "source": "./plugins/idea-validation-workflow",
+      "description": "Safely capture, clarify, promote, execute, and review Ideas through an IdeaTrace API."
+    }
+  ]
+}

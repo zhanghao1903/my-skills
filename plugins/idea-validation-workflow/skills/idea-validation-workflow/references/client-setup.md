@@ -11,9 +11,12 @@
 
 ## Client Loading
 
-- Codex: invoke the installed Skill as `$idea-validation-workflow` and keep
-  the exact plugin source Git commit in the acceptance record.
-- Claude or another compatible Markdown-Skill client: load this folder without
+- Codex: invoke the installed Skill as `$idea-validation-workflow` and keep the
+  exact plugin source Git commit in the acceptance record.
+- Claude Code: invoke the installed Skill as
+  `/idea-validation-workflow:idea-validation-workflow` and keep the exact
+  plugin source Git commit in the acceptance record.
+- Another compatible Markdown-Skill client may load this folder without
   changing `SKILL.md`; client-specific setup must not fork the decision loop.
 
 ## Objective Evidence
