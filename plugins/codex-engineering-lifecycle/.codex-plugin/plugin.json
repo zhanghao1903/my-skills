@@ -1,7 +1,7 @@
 {
   "name": "codex-engineering-lifecycle",
-  "version": "0.1.2",
-  "description": "A three-task Codex workflow for confirmed requirements, independent plan and code review, Goal-mode delivery, merge, release or no-publish acceptance, and feature closure.",
+  "version": "0.2.0",
+  "description": "A delivery-mode Codex workflow for explicit AGILE, AGILE_REVIEWED, or STRICT requirements, Goal-mode delivery, merge, release or no-publish acceptance, and feature closure.",
   "author": {
     "name": "zhanghao1903",
     "url": "https://github.com/zhanghao1903"
@@ -19,14 +19,14 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Codex Engineering Lifecycle",
-    "shortDescription": "Three-task feature delivery with independent review.",
-    "longDescription": "Initialize Requirements, Engineering Main, and Engineering Review tasks, then carry an immutable feature through confirmation, technical-plan review, serialized Goal-mode development, exact-head code review, merge, explicit release or no-publish acceptance authorization, and auditable closure.",
+    "shortDescription": "Explicit agile, weak-review, or strict feature delivery.",
+    "longDescription": "Initialize Requirements, Engineering Main, and Engineering Review tasks, explicitly select AGILE, AGILE_REVIEWED, or STRICT for each confirmed feature, then carry it through mode-appropriate planning and exact-head verification, serialized Goal-mode development, merge, explicit release or no-publish acceptance authorization, and auditable closure.",
     "developerName": "zhanghao1903",
     "category": "Productivity",
     "capabilities": [
       "Requirements",
       "Goal workflow",
-      "Plan and code review",
+      "Selectable agile and strict review",
       "Release and acceptance governance"
     ],
     "websiteURL": "https://github.com/zhanghao1903/my-skills/tree/main/plugins/codex-engineering-lifecycle",
@@ -34,7 +34,7 @@
     "termsOfServiceURL": "https://github.com/zhanghao1903/my-skills/blob/main/plugins/codex-engineering-lifecycle/TERMS.md",
     "defaultPrompt": [
       "Use $engineering-workflow-init to initialize this repository.",
-      "Use $engineering-requirements to turn my feature request into confirmed requirements.",
+      "Use $engineering-requirements to confirm my feature request with an explicit delivery mode.",
       "Use $engineering-main to continue the authorized feature lifecycle."
     ],
     "brandColor": "#335CFF",

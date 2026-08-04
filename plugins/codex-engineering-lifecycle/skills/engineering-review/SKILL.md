@@ -7,7 +7,8 @@ description: Run the Engineering Review role of an initialized Codex Engineering
 
 Independently review plans and code, write immutable review records, and merge
 only when exact-head policy permits. Read
-[review-lifecycle.md](references/review-lifecycle.md) before processing a
+[review-lifecycle.md](references/review-lifecycle.md) and
+[delivery-modes.md](../../references/delivery-modes.md) before processing a
 request.
 
 ## Role gate
@@ -24,7 +25,8 @@ this role is already acknowledged but another role is not, wait.
 
 Persist the routed JSON outside the repository, validate it with
 `accept-plan-review` or `accept-code-review`, and refuse malformed, stale,
-misrouted, duplicate-conflicting, or wrong-repository authority.
+misrouted, duplicate-conflicting, wrong-repository, or mode-mismatched
+authority. `AGILE` never sends Review a plan or code request.
 
 ## Immutable review workspace
 
@@ -46,6 +48,9 @@ unexpected tip, changed report, or path/digest mismatch as
 Review-record branches are audit evidence and are not deleted by merge policy.
 
 ## Technical-plan review
+
+Process technical-plan requests only when their immutable mode is `STRICT`.
+`AGILE` and `AGILE_REVIEWED` deliberately skip this gate.
 
 Explicitly invoke `$technical-plan-review` against the exact requirements,
 design, and implementation-plan snapshot. Apply its mandatory Pass/Fail rules.
@@ -80,14 +85,24 @@ workflowctl.py prepare-code-result
   ...request, findings, checks, report proof, and merge status...
 ```
 
-`REQUEST_CHANGES` returns control to Main. A changed PR head is stale and
-requires a new review cycle.
+For `STRICT`, apply the full blocker/major policy. For `AGILE_REVIEWED`, use the
+critical definition in `delivery-modes.md`: only a critical finding is counted
+as `blocker` and may produce `REQUEST_CHANGES`. Record every non-critical issue
+as major/minor advisory evidence and return `APPROVE` when exact-head checks
+pass. Advisory findings never authorize remediation.
+
+The first `AGILE_REVIEWED` pass must enumerate all known critical findings.
+After Main remediates them, verify those findings plus any new critical
+regression introduced by the remediation; do not start a new broad review or
+block on earlier advisory notes. A changed PR head outside that remediation is
+stale and requires a new request cycle.
 
 ## Merge gate
 
 Merge only when all are true:
 
-- decision is APPROVE with no blocking finding;
+- decision is APPROVE with no blocker finding (`AGILE_REVIEWED` may retain
+  major/minor advisory findings);
 - live head equals the reviewed exact head;
 - PR is not draft;
 - required checks are green;

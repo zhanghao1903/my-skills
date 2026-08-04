@@ -7,7 +7,9 @@ description: Initialize, inspect, repair, or explain a Codex Engineering Lifecyc
 
 Initialize one repository-scoped workflow with exactly three durable Codex
 tasks. Read [setup-and-recovery.md](references/setup-and-recovery.md) before
-creating tasks or repairing state.
+creating tasks or repairing state, and read
+[delivery-modes.md](../../references/delivery-modes.md) before explaining how
+the roles are used.
 
 ## Guardrails
 
@@ -40,6 +42,9 @@ creating tasks or repairing state.
 5. Explain the three roles, single-active-Goal queue, immutable review-record
    branches, exact-head merge gate, explicit release gate, and retained local
    state.
+6. Explain that every feature must explicitly confirm `AGILE`,
+   `AGILE_REVIEWED`, or `STRICT`. All three durable tasks remain available, but
+   AGILE routes only Requirements + Main and AGILE_REVIEWED skips plan review.
 
 ## Required user choices
 
@@ -150,6 +155,7 @@ Run `workflowctl.py status --repo <root>` and report:
 - Goal and merge policy;
 - state location;
 - that new feature requests belong in Requirements;
+- that Requirements must obtain a named delivery mode for every confirmation;
 - recovery command and uninstall/state-retention boundary.
 
 Do not claim success until all three acknowledgements are durable.

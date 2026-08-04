@@ -22,8 +22,10 @@ from typing import Any
 from urllib.parse import unquote, urlsplit
 
 SCHEMA_VERSION = 1
-STATE_SCHEMA_VERSION = 4
+MESSAGE_SCHEMA_VERSION = 2
+STATE_SCHEMA_VERSION = 5
 ROLES = ("requirements", "main", "review")
+DELIVERY_MODES = ("AGILE", "AGILE_REVIEWED", "STRICT")
 MERGE_MODES = ("review-only", "merge-on-approve")
 MERGE_METHODS = ("squash", "merge", "rebase")
 STAGES = {
@@ -185,6 +187,16 @@ def require_feature_id(value: Any, field: str = "featureId") -> str:
             "invalid_payload", f"{field} must be a slug plus 12 lowercase hex"
         )
     return text
+
+
+def require_delivery_mode(value: Any, field: str = "deliveryMode") -> str:
+    mode = require_string(value, field, maximum=32)
+    if mode not in DELIVERY_MODES:
+        raise WorkflowError(
+            "invalid_payload",
+            f"{field} must be one of {', '.join(DELIVERY_MODES)}",
+        )
+    return mode
 
 
 def require_semver(value: Any, field: str) -> str:
@@ -684,13 +696,135 @@ def validate_no_publish_acceptance(
         "authorizationSourceThreadId": source_thread_id,
         "authorizationEvidenceDigest": evidence_digest,
     }
-    if require_digest(
-        acceptance["acceptanceId"], f"{field}.acceptanceId"
-    ) != digest(authority):
+    if require_digest(acceptance["acceptanceId"], f"{field}.acceptanceId") != digest(
+        authority
+    ):
         raise WorkflowError(
             "invalid_state", f"{field}.acceptanceId does not match its authority"
         )
     return acceptance
+
+
+def validate_agile_plan_authority(
+    value: Any,
+    field: str,
+    feature_id: str,
+    delivery_mode: str,
+    config: Mapping[str, Any],
+) -> dict[str, Any]:
+    authority = exact_keys(
+        value,
+        field,
+        {
+            "authorityId",
+            "kind",
+            "workflowId",
+            "featureId",
+            "deliveryMode",
+            "requirementsMessageId",
+            "planCommitSha",
+            "planCompositeSha256",
+            "acceptanceCriteriaDigest",
+            "authorizedAt",
+        },
+    )
+    if authority["kind"] != "CONFIRMED_MODE_PLAN":
+        raise WorkflowError("invalid_state", f"{field}.kind is unsupported")
+    if delivery_mode not in {"AGILE", "AGILE_REVIEWED"}:
+        raise WorkflowError(
+            "invalid_state", f"{field} is not allowed for {delivery_mode}"
+        )
+    if (
+        authority["workflowId"] != config["workflowId"]
+        or authority["featureId"] != feature_id
+        or authority["deliveryMode"] != delivery_mode
+    ):
+        raise WorkflowError("invalid_state", f"{field} is misbound")
+    require_digest(authority["requirementsMessageId"], f"{field}.requirementsMessageId")
+    require_sha(authority["planCommitSha"], f"{field}.planCommitSha")
+    require_digest(authority["planCompositeSha256"], f"{field}.planCompositeSha256")
+    require_digest(
+        authority["acceptanceCriteriaDigest"], f"{field}.acceptanceCriteriaDigest"
+    )
+    require_timestamp(authority["authorizedAt"], f"{field}.authorizedAt")
+    authority_basis = {
+        key: item
+        for key, item in authority.items()
+        if key not in {"authorityId", "authorizedAt"}
+    }
+    if require_digest(authority["authorityId"], f"{field}.authorityId") != digest(
+        authority_basis
+    ):
+        raise WorkflowError(
+            "invalid_state", f"{field}.authorityId does not match its authority"
+        )
+    return authority
+
+
+def validate_agile_verification(
+    value: Any,
+    field: str,
+    feature_id: str,
+    config: Mapping[str, Any],
+) -> dict[str, Any]:
+    verification = exact_keys(
+        value,
+        field,
+        {
+            "authorityId",
+            "kind",
+            "workflowId",
+            "featureId",
+            "deliveryMode",
+            "pullRequest",
+            "checks",
+            "coreJourney",
+            "summary",
+            "verifiedAt",
+        },
+    )
+    if verification["kind"] != "AGILE_SELF_VERIFICATION":
+        raise WorkflowError("invalid_state", f"{field}.kind is unsupported")
+    if (
+        verification["workflowId"] != config["workflowId"]
+        or verification["featureId"] != feature_id
+        or verification["deliveryMode"] != "AGILE"
+    ):
+        raise WorkflowError("invalid_state", f"{field} is misbound")
+    validate_pull_request_shape(verification["pullRequest"], f"{field}.pullRequest")
+    checks = exact_keys(
+        verification["checks"],
+        f"{field}.checks",
+        {"status", "checkedAt"},
+        {"detailsUrl"},
+    )
+    if checks["status"] != "PASSING":
+        raise WorkflowError("invalid_state", f"{field}.checks must be PASSING")
+    require_timestamp(checks["checkedAt"], f"{field}.checks.checkedAt")
+    if "detailsUrl" in checks:
+        require_https_url(checks["detailsUrl"], f"{field}.checks.detailsUrl")
+    core = exact_keys(
+        verification["coreJourney"],
+        f"{field}.coreJourney",
+        {"status", "evidenceDigest"},
+    )
+    if core["status"] != "PASS":
+        raise WorkflowError("invalid_state", f"{field}.coreJourney must be PASS")
+    require_digest(core["evidenceDigest"], f"{field}.coreJourney.evidenceDigest")
+    require_string(verification["summary"], f"{field}.summary", maximum=500)
+    require_timestamp(verification["verifiedAt"], f"{field}.verifiedAt")
+    authority_basis = {
+        key: item
+        for key, item in verification.items()
+        if key not in {"authorityId", "verifiedAt"}
+    }
+    if require_digest(verification["authorityId"], f"{field}.authorityId") != digest(
+        authority_basis
+    ):
+        raise WorkflowError(
+            "invalid_state", f"{field}.authorityId does not match its authority"
+        )
+    return verification
 
 
 def validate_feature_record(
@@ -706,6 +840,7 @@ def validate_feature_record(
             "featureId",
             "title",
             "branch",
+            "deliveryMode",
             "stage",
             "requirements",
             "planReviewCycle",
@@ -728,12 +863,17 @@ def validate_feature_record(
             "release",
             "noPublishAcceptance",
             "closure",
+            "agilePlanAuthority",
+            "agileVerification",
         },
     )
     if feature["featureId"] != feature_id:
         raise WorkflowError("invalid_state", "Feature key and featureId differ")
     require_string(feature["title"], f"{field}.title", maximum=200)
     require_string(feature["branch"], f"{field}.branch", maximum=240)
+    delivery_mode = require_delivery_mode(
+        feature["deliveryMode"], f"{field}.deliveryMode"
+    )
     if feature["stage"] not in STAGES:
         raise WorkflowError(
             "invalid_state", f"Feature {feature_id} has unsupported stage"
@@ -766,6 +906,35 @@ def validate_feature_record(
             require_digest(feature[name], f"{field}.{name}")
     if "plan" in feature:
         validate_plan_shape(feature["plan"], f"{field}.plan")
+    if "agilePlanAuthority" in feature:
+        authority = validate_agile_plan_authority(
+            feature["agilePlanAuthority"],
+            f"{field}.agilePlanAuthority",
+            feature_id,
+            delivery_mode,
+            config,
+        )
+        if (
+            authority["requirementsMessageId"] != feature.get("requirementsMessageId")
+            or authority["planCommitSha"]
+            != feature.get("plan", {}).get("planCommitSha")
+            or authority["planCompositeSha256"]
+            != feature.get("plan", {}).get("compositeSha256")
+        ):
+            raise WorkflowError(
+                "invalid_state", f"{field}.agilePlanAuthority differs from feature"
+            )
+    if "agileVerification" in feature:
+        verification = validate_agile_verification(
+            feature["agileVerification"],
+            f"{field}.agileVerification",
+            feature_id,
+            config,
+        )
+        if verification["pullRequest"] != feature.get("pullRequest"):
+            raise WorkflowError(
+                "invalid_state", f"{field}.agileVerification differs from pull request"
+            )
     if "pullRequest" in feature:
         validate_pull_request_shape(feature["pullRequest"], f"{field}.pullRequest")
     if "merge" in feature:
@@ -829,9 +998,8 @@ def validate_feature_record(
             feature_id,
             config,
         )
-        if (
-            no_publish_acceptance["mergeCommitSha"]
-            != feature.get("merge", {}).get("mergeCommitSha")
+        if no_publish_acceptance["mergeCommitSha"] != feature.get("merge", {}).get(
+            "mergeCommitSha"
         ):
             raise WorkflowError(
                 "invalid_state", f"{field}.noPublishAcceptance merge is misbound"
@@ -1060,22 +1228,42 @@ def validate_feature_record(
             )
     if "closure" in feature:
         closure = validate_closure_shape(feature["closure"])
-        common_mismatch = (
-            closure["requirementsMessageId"] != feature.get("requirementsMessageId")
-            or closure["planReviewResultMessageId"]
-            != feature.get("planResultMessageId")
-            or closure["codeReviewResultMessageId"]
-            != feature.get("codeResultMessageId")
-            or closure["mergeCommitSha"]
-            != feature.get("merge", {}).get("mergeCommitSha")
-        )
+        if "developmentAuthorityId" in closure:
+            expected_development = (
+                feature.get("planResultMessageId")
+                if delivery_mode == "STRICT"
+                else feature.get("agilePlanAuthority", {}).get("authorityId")
+            )
+            expected_delivery = (
+                feature.get("agileVerification", {}).get("authorityId")
+                if delivery_mode == "AGILE"
+                else feature.get("codeResultMessageId")
+            )
+            common_mismatch = (
+                closure["deliveryMode"] != delivery_mode
+                or closure["developmentAuthorityId"] != expected_development
+                or closure["deliveryAuthorityId"] != expected_delivery
+                or closure["requirementsMessageId"]
+                != feature.get("requirementsMessageId")
+                or closure["mergeCommitSha"]
+                != feature.get("merge", {}).get("mergeCommitSha")
+            )
+        else:
+            common_mismatch = (
+                closure["requirementsMessageId"] != feature.get("requirementsMessageId")
+                or closure["planReviewResultMessageId"]
+                != feature.get("planResultMessageId")
+                or closure["codeReviewResultMessageId"]
+                != feature.get("codeResultMessageId")
+                or closure["mergeCommitSha"]
+                != feature.get("merge", {}).get("mergeCommitSha")
+            )
         if common_mismatch:
             raise WorkflowError("invalid_state", f"{field}.closure is misbound")
         if no_publish_acceptance:
             if (
                 closure.get("disposition") != "ACCEPTED_NO_PUBLISH"
-                or closure.get("acceptanceId")
-                != no_publish_acceptance["acceptanceId"]
+                or closure.get("acceptanceId") != no_publish_acceptance["acceptanceId"]
                 or closure["releaseTargets"] != []
             ):
                 raise WorkflowError("invalid_state", f"{field}.closure is misbound")
@@ -1144,15 +1332,38 @@ def validate_feature_record(
         )
     if stage in plan_required and "plan" not in feature:
         raise WorkflowError("invalid_state", f"{field} lacks a plan snapshot")
-    if stage in plan_result_required and "planResultMessageId" not in feature:
-        raise WorkflowError("invalid_state", f"{field} lacks plan approval authority")
+    if (
+        stage in {"PLAN_REVIEW_PENDING", "PLAN_CHANGES_REQUESTED", "PLAN_APPROVED"}
+        and delivery_mode != "STRICT"
+    ):
+        raise WorkflowError(
+            "invalid_state", f"{field} uses a strict-only plan-review stage"
+        )
+    if stage in plan_result_required:
+        if delivery_mode == "STRICT" and "planResultMessageId" not in feature:
+            raise WorkflowError(
+                "invalid_state", f"{field} lacks strict plan-review authority"
+            )
+        if delivery_mode != "STRICT" and "agilePlanAuthority" not in feature:
+            raise WorkflowError(
+                "invalid_state", f"{field} lacks confirmed-mode plan authority"
+            )
     if stage in pull_required and "pullRequest" not in feature:
         raise WorkflowError("invalid_state", f"{field} lacks a pull request snapshot")
     if (
-        stage in {"MERGE_READY", *merge_required}
-        and "codeResultMessageId" not in feature
+        stage in {"CODE_REVIEW_PENDING", "CODE_CHANGES_REQUESTED"}
+        and delivery_mode == "AGILE"
     ):
-        raise WorkflowError("invalid_state", f"{field} lacks code review authority")
+        raise WorkflowError(
+            "invalid_state", f"{field} uses a review stage in AGILE mode"
+        )
+    if stage in {"MERGE_READY", *merge_required}:
+        if delivery_mode == "AGILE" and "agileVerification" not in feature:
+            raise WorkflowError(
+                "invalid_state", f"{field} lacks agile verification authority"
+            )
+        if delivery_mode != "AGILE" and "codeResultMessageId" not in feature:
+            raise WorkflowError("invalid_state", f"{field} lacks code review authority")
     if stage in merge_required and "merge" not in feature:
         raise WorkflowError("invalid_state", f"{field} lacks merge proof")
     if stage in release_required and "release" not in feature:
@@ -1171,9 +1382,7 @@ def validate_feature_record(
     if stage == "CLOSED":
         release_complete = bool(
             release_result
-            and all(
-                item["status"] == "PUBLISHED" for item in release_result["targets"]
-            )
+            and all(item["status"] == "PUBLISHED" for item in release_result["targets"])
         )
         if release_complete == bool(no_publish_acceptance):
             raise WorkflowError(
@@ -1229,6 +1438,12 @@ def validate_dispatch_record(
         or digest(payload) != record["payloadDigest"]
     ):
         raise WorkflowError("invalid_state", f"{field} payload ledger is inconsistent")
+    feature = features.get(record["featureId"])
+    payload_mode = payload["body"].get("deliveryMode", "STRICT")
+    if not isinstance(feature, dict) or feature.get("deliveryMode") != payload_mode:
+        raise WorkflowError(
+            "invalid_state", f"{field} DeliveryMode differs from its feature"
+        )
     require_timestamp(record["preparedAt"], f"{field}.preparedAt")
     timestamp_for_status = {
         "dispatched": "dispatchedAt",
@@ -1490,6 +1705,24 @@ def migrate_state_v3(value: Any) -> tuple[dict[str, Any], bool]:
     if not isinstance(version, int) or isinstance(version, bool) or version != 3:
         return dict(state), False
     migrated = require_object(json.loads(canonical_json(state)), "state")
+    migrated["schemaVersion"] = 4
+    migrated["updatedAt"] = utc_now()
+    return migrated, True
+
+
+def migrate_state_v4(value: Any) -> tuple[dict[str, Any], bool]:
+    state = require_object(value, "state")
+    version = state.get("schemaVersion")
+    if not isinstance(version, int) or isinstance(version, bool) or version != 4:
+        return dict(state), False
+    migrated = require_object(json.loads(canonical_json(state)), "state")
+    features = migrated.get("features")
+    if isinstance(features, dict):
+        for feature in features.values():
+            if isinstance(feature, dict):
+                # State v4 only supported the full independent-review lifecycle.
+                # STRICT therefore preserves, rather than infers, its old semantics.
+                feature["deliveryMode"] = "STRICT"
     migrated["schemaVersion"] = STATE_SCHEMA_VERSION
     migrated["updatedAt"] = utc_now()
     return migrated, True
@@ -1499,7 +1732,8 @@ def migrate_state(value: Any) -> tuple[dict[str, Any], bool]:
     state, migrated_v1 = migrate_state_v1(value)
     state, migrated_v2 = migrate_state_v2(state)
     state, migrated_v3 = migrate_state_v3(state)
-    return state, migrated_v1 or migrated_v2 or migrated_v3
+    state, migrated_v4 = migrate_state_v4(state)
+    return state, migrated_v1 or migrated_v2 or migrated_v3 or migrated_v4
 
 
 def load_state_locked(
@@ -1787,14 +2021,20 @@ def validate_routed_body(
     body_value: Any,
     feature_id: str,
     cycle: int,
+    schema_version: int,
 ) -> dict[str, Any]:
     field = f"{message_type}.body"
+    mode_required = {"deliveryMode"} if schema_version >= 2 else set()
+    mode_optional = set() if schema_version >= 2 else {"deliveryMode"}
     if message_type == "RequirementsHandoff":
         body = exact_keys(
             body_value,
             field,
-            {"title", "branch", "requirements", "confirmation"},
+            {"title", "branch", "requirements", "confirmation"} | mode_required,
+            mode_optional,
         )
+        if "deliveryMode" in body:
+            require_delivery_mode(body["deliveryMode"], f"{field}.deliveryMode")
         require_string(body["title"], f"{field}.title", maximum=200)
         require_string(body["branch"], f"{field}.branch", maximum=240)
         validate_artifact_shape(body["requirements"], f"{field}.requirements")
@@ -1823,9 +2063,17 @@ def validate_routed_body(
         body = exact_keys(
             body_value,
             field,
-            {"plan", "reviewRecordBranch", "acceptanceCriteriaDigest"},
-            {"previousResultMessageId"},
+            {"plan", "reviewRecordBranch", "acceptanceCriteriaDigest"} | mode_required,
+            {"previousResultMessageId"} | mode_optional,
         )
+        if (
+            "deliveryMode" in body
+            and require_delivery_mode(body["deliveryMode"], f"{field}.deliveryMode")
+            != "STRICT"
+        ):
+            raise WorkflowError(
+                "invalid_payload", "Technical plan review is STRICT-only"
+            )
         plan = validate_plan_shape(body["plan"], f"{field}.plan")
         expected = (
             f"codex/review-records/{feature_id}/plan-{cycle}-"
@@ -1854,8 +2102,18 @@ def validate_routed_body(
                 "findings",
                 "report",
                 "summary",
-            },
+            }
+            | mode_required,
+            mode_optional,
         )
+        if (
+            "deliveryMode" in body
+            and require_delivery_mode(body["deliveryMode"], f"{field}.deliveryMode")
+            != "STRICT"
+        ):
+            raise WorkflowError(
+                "invalid_payload", "Technical plan review is STRICT-only"
+            )
         require_digest(body["requestMessageId"], f"{field}.requestMessageId")
         reviewed = exact_keys(
             body["reviewedPlan"],
@@ -1880,9 +2138,18 @@ def validate_routed_body(
         body = exact_keys(
             body_value,
             field,
-            {"pullRequest", "reviewRecordBranch", "mergePolicy"},
-            {"previousResultMessageId"},
+            {"pullRequest", "reviewRecordBranch", "mergePolicy"} | mode_required,
+            {"previousResultMessageId"} | mode_optional,
         )
+        delivery_mode = (
+            require_delivery_mode(body["deliveryMode"], f"{field}.deliveryMode")
+            if "deliveryMode" in body
+            else "STRICT"
+        )
+        if delivery_mode == "AGILE":
+            raise WorkflowError(
+                "invalid_payload", "AGILE does not route an independent code review"
+            )
         pull = validate_pull_request_shape(body["pullRequest"], f"{field}.pullRequest")
         expected = (
             f"codex/review-records/{feature_id}/code-{cycle}-{pull['headSha'][:12]}"
@@ -1910,8 +2177,19 @@ def validate_routed_body(
                 "checks",
                 "merge",
                 "summary",
-            },
+            }
+            | mode_required,
+            mode_optional,
         )
+        delivery_mode = (
+            require_delivery_mode(body["deliveryMode"], f"{field}.deliveryMode")
+            if "deliveryMode" in body
+            else "STRICT"
+        )
+        if delivery_mode == "AGILE":
+            raise WorkflowError(
+                "invalid_payload", "AGILE does not route an independent code review"
+            )
         require_digest(body["requestMessageId"], f"{field}.requestMessageId")
         validate_pull_request_shape(
             body["reviewedPullRequest"], f"{field}.reviewedPullRequest"
@@ -1976,6 +2254,13 @@ def validate_routed_body(
                 raise WorkflowError(
                     "invalid_payload",
                     "APPROVE requires READY, MERGED, or FAILED merge status",
+                )
+            if delivery_mode == "AGILE_REVIEWED" and (
+                body["decision"] != "REQUEST_CHANGES" or not findings["blocker"]
+            ):
+                raise WorkflowError(
+                    "invalid_payload",
+                    "AGILE_REVIEWED NOT_REQUESTED requires critical changes",
                 )
         elif status == "STALE":
             exact_keys(merge_value, f"{field}.merge", {"status"})
@@ -2177,8 +2462,6 @@ def validate_release_result_shape(value: Any) -> dict[str, Any]:
 def validate_closure_shape(value: Any) -> dict[str, Any]:
     common = {
         "requirementsMessageId",
-        "planReviewResultMessageId",
-        "codeReviewResultMessageId",
         "mergeCommitSha",
         "releaseTargets",
         "scenariosSolved",
@@ -2187,11 +2470,22 @@ def validate_closure_shape(value: Any) -> dict[str, Any]:
         "closureId",
     }
     raw = require_object(value, "ClosureRecord")
+    if "developmentAuthorityId" in raw or "deliveryAuthorityId" in raw:
+        authority_fields = {
+            "deliveryMode",
+            "developmentAuthorityId",
+            "deliveryAuthorityId",
+        }
+    else:
+        authority_fields = {
+            "planReviewResultMessageId",
+            "codeReviewResultMessageId",
+        }
     if raw.get("disposition") == "ACCEPTED_NO_PUBLISH":
         closure = exact_keys(
             raw,
             "ClosureRecord",
-            common | {"disposition", "acceptanceId"},
+            common | authority_fields | {"disposition", "acceptanceId"},
         )
         require_digest(closure["acceptanceId"], "acceptanceId")
         if closure["releaseTargets"] != []:
@@ -2203,15 +2497,17 @@ def validate_closure_shape(value: Any) -> dict[str, Any]:
         closure = exact_keys(
             raw,
             "ClosureRecord",
-            common | {"releaseResultId"},
+            common | authority_fields | {"releaseResultId"},
         )
         require_digest(closure["releaseResultId"], "releaseResultId")
-    for name in (
-        "requirementsMessageId",
-        "planReviewResultMessageId",
-        "codeReviewResultMessageId",
+    for name in {"requirementsMessageId"} | (
+        {"developmentAuthorityId", "deliveryAuthorityId"}
+        if "developmentAuthorityId" in closure
+        else {"planReviewResultMessageId", "codeReviewResultMessageId"}
     ):
         require_digest(closure[name], name)
+    if "deliveryMode" in closure:
+        require_delivery_mode(closure["deliveryMode"])
     require_sha(closure["mergeCommitSha"], "mergeCommitSha")
     if not isinstance(closure["releaseTargets"], list):
         raise WorkflowError("invalid_payload", "releaseTargets must be an array")
@@ -2260,11 +2556,12 @@ def validate_contract_payload(value: Any, contract_name: str) -> dict[str, Any]:
             },
         )
         if (
-            message["schemaVersion"] != SCHEMA_VERSION
+            message["schemaVersion"] not in {1, MESSAGE_SCHEMA_VERSION}
             or message["type"] != contract_name
         ):
             raise WorkflowError(
-                "invalid_payload", f"Expected {contract_name} schema v1"
+                "invalid_payload",
+                f"Expected {contract_name} schema v1 or v{MESSAGE_SCHEMA_VERSION}",
             )
         try:
             uuid.UUID(require_string(message["workflowId"], "workflowId", maximum=36))
@@ -2293,7 +2590,11 @@ def validate_contract_payload(value: Any, contract_name: str) -> dict[str, Any]:
         cycle = require_int(message["cycle"], "cycle", minimum=1)
         require_timestamp(message["createdAt"], "createdAt")
         validate_routed_body(
-            contract_name, message["body"], message["featureId"], cycle
+            contract_name,
+            message["body"],
+            message["featureId"],
+            cycle,
+            message["schemaVersion"],
         )
         if digest(message_authority(message)) != message["messageId"]:
             raise WorkflowError(
@@ -2316,10 +2617,17 @@ def parse_requirements_metadata(content: bytes) -> dict[str, str]:
         raise WorkflowError(
             "invalid_requirements", "Requirements must be UTF-8 Markdown"
         ) from exc
-    names = ("Status", "FeatureId", "Branch", "ConfirmedBy", "ConfirmedAt")
+    names = (
+        "Status",
+        "FeatureId",
+        "Branch",
+        "DeliveryMode",
+        "ConfirmedBy",
+        "ConfirmedAt",
+    )
     matches: list[tuple[int, str, str]] = []
     metadata_pattern = re.compile(
-        r"^-\s*(Status|FeatureId|Branch|ConfirmedBy|ConfirmedAt):\s*(.*?)\s*$"
+        r"^-\s*(Status|FeatureId|Branch|DeliveryMode|ConfirmedBy|ConfirmedAt):\s*(.*?)\s*$"
     )
     for index, line in enumerate(text.splitlines()):
         match = metadata_pattern.fullmatch(line)
@@ -2346,12 +2654,13 @@ def parse_requirements_metadata(content: bytes) -> dict[str, str]:
         raise WorkflowError(
             "requirements_unconfirmed", "Requirements status must be Confirmed"
         )
-    for name in ("FeatureId", "Branch", "ConfirmedBy", "ConfirmedAt"):
+    for name in ("FeatureId", "Branch", "DeliveryMode", "ConfirmedBy", "ConfirmedAt"):
         if not fields.get(name):
             raise WorkflowError(
                 "requirements_unconfirmed", f"Requirements metadata {name} is required"
             )
     require_feature_id(fields["FeatureId"], "requirements.FeatureId")
+    require_delivery_mode(fields["DeliveryMode"], "requirements.DeliveryMode")
     require_timestamp(fields["ConfirmedAt"], "requirements.ConfirmedAt")
     return fields
 
@@ -2407,7 +2716,7 @@ def build_message(
     body: Mapping[str, Any],
 ) -> dict[str, Any]:
     message: dict[str, Any] = {
-        "schemaVersion": SCHEMA_VERSION,
+        "schemaVersion": MESSAGE_SCHEMA_VERSION,
         "type": message_type,
         "workflowId": config["workflowId"],
         "featureId": require_feature_id(feature_id),
@@ -2484,13 +2793,18 @@ def feature_for(state: Mapping[str, Any], feature_id: str) -> dict[str, Any]:
 
 
 def new_feature(
-    feature_id: str, title: str, branch: str, requirements: Mapping[str, Any]
+    feature_id: str,
+    title: str,
+    branch: str,
+    delivery_mode: str,
+    requirements: Mapping[str, Any],
 ) -> dict[str, Any]:
     now = utc_now()
     return {
         "featureId": feature_id,
         "title": require_string(title, "title", maximum=200),
         "branch": require_string(branch, "branch", maximum=240),
+        "deliveryMode": require_delivery_mode(delivery_mode),
         "stage": "REQUIREMENTS_CONFIRMED",
         "requirements": dict(requirements),
         "planReviewCycle": 0,
@@ -2894,6 +3208,7 @@ def command_status(args: argparse.Namespace) -> dict[str, Any]:
         feature_id: {
             "title": feature["title"],
             "branch": feature["branch"],
+            "deliveryMode": feature["deliveryMode"],
             "stage": feature["stage"],
             "planReviewCycle": feature.get("planReviewCycle", 0),
             "codeReviewCycle": feature.get("codeReviewCycle", 0),
@@ -2987,17 +3302,25 @@ def command_prepare_requirements(args: argparse.Namespace) -> dict[str, Any]:
             raise WorkflowError(
                 "snapshot_mismatch", "Requirements metadata differs from command"
             )
+        delivery_mode = require_delivery_mode(args.delivery_mode)
+        if metadata["DeliveryMode"] != delivery_mode:
+            raise WorkflowError(
+                "snapshot_mismatch",
+                "Requirements DeliveryMode differs from the explicit command mode",
+            )
+        confirmation_evidence = require_string(
+            args.confirmation_evidence, "confirmationEvidence", maximum=300
+        )
         body = {
             "title": require_string(args.title, "title", maximum=200),
             "branch": branch,
+            "deliveryMode": delivery_mode,
             "requirements": snapshot,
             "confirmation": {
                 "status": "CONFIRMED",
                 "confirmedBy": metadata["ConfirmedBy"],
                 "confirmedAt": metadata["ConfirmedAt"],
-                "evidence": require_string(
-                    args.confirmation_evidence, "confirmationEvidence", maximum=300
-                ),
+                "evidence": confirmation_evidence,
             },
         }
         message = build_message(
@@ -3012,14 +3335,18 @@ def command_prepare_requirements(args: argparse.Namespace) -> dict[str, Any]:
         stored, duplicate = record_message(state, message)
         existing = state["features"].get(feature_id)
         if existing:
-            if existing["requirements"] != snapshot or existing["branch"] != branch:
+            if (
+                existing["requirements"] != snapshot
+                or existing["branch"] != branch
+                or existing["deliveryMode"] != delivery_mode
+            ):
                 raise WorkflowError(
                     "feature_conflict",
-                    "Feature ID already uses another requirements snapshot",
+                    "Feature ID already uses another requirements snapshot or mode",
                 )
         else:
             state["features"][feature_id] = new_feature(
-                feature_id, args.title, branch, snapshot
+                feature_id, args.title, branch, delivery_mode, snapshot
             )
         save_state(paths, state, config)
     return {"ok": True, "duplicate": duplicate, "message": stored}
@@ -3113,6 +3440,8 @@ def command_accept_requirements(args: argparse.Namespace) -> dict[str, Any]:
     ) -> None:
         del duplicate
         body = payload["body"]
+        payload_mode = body.get("deliveryMode", "STRICT")
+        require_delivery_mode(payload_mode, "RequirementsHandoff.body.deliveryMode")
         validate_artifact(
             body["requirements"],
             "RequirementsHandoff.body.requirements",
@@ -3122,6 +3451,7 @@ def command_accept_requirements(args: argparse.Namespace) -> dict[str, Any]:
         if (
             feature["requirements"] != body["requirements"]
             or feature["branch"] != body["branch"]
+            or feature["deliveryMode"] != payload_mode
         ):
             raise WorkflowError(
                 "snapshot_mismatch", "Requirements payload differs from durable feature"
@@ -3157,6 +3487,11 @@ def command_prepare_plan_review(args: argparse.Namespace) -> dict[str, Any]:
     with locked(paths["lock"]):
         state = validate_state(load_json(paths["state"], "state"), config)
         feature = feature_for(state, args.feature_id)
+        if feature["deliveryMode"] != "STRICT":
+            raise WorkflowError(
+                "invalid_transition",
+                "Independent technical-plan review is available only in STRICT mode",
+            )
         if feature["stage"] not in {"PLAN_DRAFTING", "PLAN_CHANGES_REQUESTED"}:
             raise WorkflowError(
                 "invalid_transition", "Feature is not ready for plan review"
@@ -3177,6 +3512,7 @@ def command_prepare_plan_review(args: argparse.Namespace) -> dict[str, Any]:
         cycle = feature["planReviewCycle"] + 1
         branch = f"codex/review-records/{args.feature_id}/plan-{cycle}-{commit[:12]}"
         body = {
+            "deliveryMode": "STRICT",
             "plan": {
                 "requirements": requirements,
                 "design": design,
@@ -3221,6 +3557,10 @@ def command_accept_plan_review(args: argparse.Namespace) -> dict[str, Any]:
         duplicate: bool,
     ) -> None:
         feature = feature_for(state, payload["featureId"])
+        if feature["deliveryMode"] != payload["body"].get("deliveryMode", "STRICT"):
+            raise WorkflowError(
+                "snapshot_mismatch", "Plan request DeliveryMode differs from feature"
+            )
         if feature.get("pendingPlanRequestId") != payload["messageId"]:
             raise WorkflowError(
                 "stale_result", "Plan request is not the latest pending snapshot"
@@ -3240,6 +3580,85 @@ def command_accept_plan_review(args: argparse.Namespace) -> dict[str, Any]:
         "ok": True,
         "duplicate": duplicate,
         "messageId": payload["messageId"],
+        "stage": feature["stage"],
+    }
+
+
+def command_queue_agile_development(args: argparse.Namespace) -> dict[str, Any]:
+    repository, paths, config, _ = load_context(args.repo)
+    require_role(config, args.task_id, "main")
+    with locked(paths["lock"]):
+        state = validate_state(load_json(paths["state"], "state"), config)
+        feature = feature_for(state, args.feature_id)
+        if feature["deliveryMode"] not in {"AGILE", "AGILE_REVIEWED"}:
+            raise WorkflowError(
+                "invalid_transition",
+                "queue-agile-development requires AGILE or AGILE_REVIEWED mode",
+            )
+        if feature["stage"] not in {"PLAN_DRAFTING", "DEVELOPMENT_QUEUED"}:
+            raise WorkflowError(
+                "invalid_transition", "Feature is not ready for agile plan binding"
+            )
+        commit = require_sha(args.plan_commit_sha, "planCommitSha")
+        requirements = artifact_snapshot(
+            repository["root"], commit, args.requirements_path
+        )
+        if requirements["sha256"] != feature["requirements"]["sha256"]:
+            raise WorkflowError(
+                "snapshot_mismatch", "Confirmed requirements changed in plan snapshot"
+            )
+        design = artifact_snapshot(repository["root"], commit, args.design_path)
+        implementation = artifact_snapshot(
+            repository["root"], commit, args.implementation_plan_path
+        )
+        plan = {
+            "requirements": requirements,
+            "design": design,
+            "implementationPlan": implementation,
+            "planCommitSha": commit,
+            "compositeSha256": digest([requirements, design, implementation]),
+        }
+        authority_basis = {
+            "kind": "CONFIRMED_MODE_PLAN",
+            "workflowId": config["workflowId"],
+            "featureId": feature["featureId"],
+            "deliveryMode": feature["deliveryMode"],
+            "requirementsMessageId": require_digest(
+                feature.get("requirementsMessageId"), "requirementsMessageId"
+            ),
+            "planCommitSha": commit,
+            "planCompositeSha256": plan["compositeSha256"],
+            "acceptanceCriteriaDigest": require_digest(
+                args.acceptance_criteria_digest, "acceptanceCriteriaDigest"
+            ),
+        }
+        authority = {
+            **authority_basis,
+            "authorityId": digest(authority_basis),
+            "authorizedAt": utc_now(),
+        }
+        existing = feature.get("agilePlanAuthority")
+        if existing:
+            if existing["authorityId"] != authority["authorityId"]:
+                raise WorkflowError(
+                    "replay_conflict",
+                    "Feature already has different confirmed-mode plan authority",
+                )
+            return {
+                "ok": True,
+                "duplicate": True,
+                "authority": existing,
+                "stage": feature["stage"],
+            }
+        feature["plan"] = plan
+        feature["agilePlanAuthority"] = authority
+        add_queue(state, feature["featureId"])
+        touch(feature, "DEVELOPMENT_QUEUED")
+        save_state(paths, state, config)
+    return {
+        "ok": True,
+        "duplicate": False,
+        "authority": authority,
         "stage": feature["stage"],
     }
 
@@ -3293,6 +3712,7 @@ def command_prepare_plan_result(args: argparse.Namespace) -> dict[str, Any]:
         report["commitSha"],
     )
     body = {
+        "deliveryMode": request["body"].get("deliveryMode", "STRICT"),
         "requestMessageId": request["messageId"],
         "reviewedPlan": {
             "planCommitSha": request["body"]["plan"]["planCommitSha"],
@@ -3355,6 +3775,7 @@ def command_apply_plan_result(args: argparse.Namespace) -> dict[str, Any]:
             "report",
             "summary",
         },
+        {"deliveryMode"},
     )
     validate_report(
         body["report"], "TechnicalPlanReviewResult.body.report", repository["root"]
@@ -3362,6 +3783,10 @@ def command_apply_plan_result(args: argparse.Namespace) -> dict[str, Any]:
     with locked(paths["lock"]):
         state = validate_state(load_json(paths["state"], "state"), config)
         feature = feature_for(state, result["featureId"])
+        if feature["deliveryMode"] != body.get("deliveryMode", "STRICT"):
+            raise WorkflowError(
+                "snapshot_mismatch", "Plan result DeliveryMode differs from feature"
+            )
         if feature.get("pendingPlanRequestId") != body["requestMessageId"]:
             raise WorkflowError(
                 "stale_result", "Plan result does not match pending request"
@@ -3431,14 +3856,16 @@ def command_start_development(args: argparse.Namespace) -> dict[str, Any]:
             if feature.get("codeResultMessageId")
             else "INITIAL_IMPLEMENTATION"
         )
-        authority = (
-            feature.get("codeResultMessageId")
-            if purpose == "CODE_REMEDIATION"
-            else feature.get("planResultMessageId")
-        )
+        if purpose == "CODE_REMEDIATION":
+            authority = feature.get("codeResultMessageId")
+        elif feature["deliveryMode"] == "STRICT":
+            authority = feature.get("planResultMessageId")
+        else:
+            authority = feature.get("agilePlanAuthority", {}).get("authorityId")
         if not authority:
             raise WorkflowError(
-                "invalid_transition", "GoalRun lacks an authorizing review result"
+                "invalid_transition",
+                "GoalRun lacks delivery-mode development authority",
             )
         review_cycle = (
             feature["codeReviewCycle"] if purpose == "CODE_REMEDIATION" else 0
@@ -3705,12 +4132,171 @@ def command_abandon_development(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def command_record_agile_verification(args: argparse.Namespace) -> dict[str, Any]:
+    repository, paths, config, _ = load_context(args.repo)
+    require_role(config, args.task_id, "main")
+    evidence = require_string(
+        args.core_journey_evidence, "coreJourneyEvidence", maximum=4000
+    )
+    with locked(paths["lock"]):
+        state = validate_state(load_json(paths["state"], "state"), config)
+        feature = feature_for(state, args.feature_id)
+        if feature["deliveryMode"] != "AGILE":
+            raise WorkflowError(
+                "invalid_transition", "record-agile-verification requires AGILE mode"
+            )
+        if feature["stage"] not in {
+            "DEVELOPMENT_COMPLETE",
+            "MERGE_READY",
+            "RELEASE_AWAITING_AUTHORIZATION",
+        }:
+            raise WorkflowError(
+                "invalid_transition", "AGILE feature is not ready for verification"
+            )
+        number = require_int(args.pr_number, "prNumber", minimum=1)
+        expected_url = f"https://github.com/{repository['key']}/pull/{number}"
+        if (
+            require_https_url(args.pr_url, "prUrl", host="github.com").rstrip("/")
+            != expected_url
+        ):
+            raise WorkflowError(
+                "repository_mismatch",
+                "PR URL does not match workflow repository/number",
+            )
+        base_sha = require_sha(args.base_sha, "baseSha")
+        head_sha = require_sha(args.head_sha, "headSha")
+        run_git(repository["root"], "cat-file", "-e", f"{base_sha}^{{commit}}")
+        run_git(repository["root"], "cat-file", "-e", f"{head_sha}^{{commit}}")
+        pull = {
+            "number": number,
+            "url": expected_url,
+            "baseRef": require_string(args.base_ref, "baseRef", maximum=240),
+            "baseSha": base_sha,
+            "headRef": require_string(args.head_ref, "headRef", maximum=240),
+            "headSha": head_sha,
+        }
+        checks: dict[str, Any] = {
+            "status": "PASSING",
+            "checkedAt": require_timestamp(args.checks_checked_at, "checksCheckedAt"),
+        }
+        if args.checks_url:
+            checks["detailsUrl"] = require_https_url(args.checks_url, "checksUrl")
+        verification_basis = {
+            "kind": "AGILE_SELF_VERIFICATION",
+            "workflowId": config["workflowId"],
+            "featureId": feature["featureId"],
+            "deliveryMode": "AGILE",
+            "pullRequest": pull,
+            "checks": checks,
+            "coreJourney": {
+                "status": "PASS",
+                "evidenceDigest": hashlib.sha256(evidence.encode("utf-8")).hexdigest(),
+            },
+            "summary": require_string(args.summary, "summary", maximum=500),
+        }
+        verification = {
+            **verification_basis,
+            "authorityId": digest(verification_basis),
+            "verifiedAt": utc_now(),
+        }
+        existing = feature.get("agileVerification")
+        if existing and existing["authorityId"] != verification["authorityId"]:
+            raise WorkflowError(
+                "replay_conflict",
+                "Feature already has different agile verification authority",
+            )
+        existing_pull = feature.get("pullRequest")
+        if existing_pull is not None and existing_pull != pull:
+            raise WorkflowError(
+                "replay_conflict", "Feature already binds another pull request snapshot"
+            )
+        if args.merge_status == "READY":
+            if config["policy"]["merge"]["mode"] != "review-only":
+                raise WorkflowError(
+                    "invalid_transition", "READY is only valid for review-only policy"
+                )
+            if feature["stage"] == "RELEASE_AWAITING_AUTHORIZATION":
+                return {
+                    "ok": True,
+                    "duplicate": True,
+                    "verification": existing,
+                    "stage": feature["stage"],
+                }
+            duplicate = existing is not None and feature["stage"] == "MERGE_READY"
+            if not duplicate:
+                feature["pullRequest"] = pull
+                feature["agileVerification"] = verification
+                touch(feature, "MERGE_READY")
+                save_state(paths, state, config)
+            return {
+                "ok": True,
+                "duplicate": duplicate,
+                "verification": existing or verification,
+                "stage": feature["stage"],
+            }
+        if args.merge_status != "MERGED":
+            raise WorkflowError("invalid_payload", "Unsupported agile merge status")
+        if args.merge_method != config["policy"]["merge"]["method"]:
+            raise WorkflowError(
+                "invalid_payload", "Merge method differs from local policy"
+            )
+        merge_url = require_https_url(args.merge_url, "mergeUrl", host="github.com")
+        if merge_url.rstrip("/") != expected_url:
+            raise WorkflowError(
+                "snapshot_mismatch", "Merge URL differs from verified PR"
+            )
+        merge = {
+            "method": args.merge_method,
+            "prUrl": expected_url,
+            "approvedHeadSha": head_sha,
+            "mergeCommitSha": require_sha(args.merge_sha, "mergeSha"),
+            "mergedAt": require_timestamp(args.merged_at, "mergedAt"),
+        }
+        if "merge" in feature:
+            if feature["merge"] != merge:
+                raise WorkflowError(
+                    "replay_conflict", "Feature already has different merge proof"
+                )
+            return {
+                "ok": True,
+                "duplicate": True,
+                "verification": existing,
+                "merge": feature["merge"],
+                "stage": feature["stage"],
+            }
+        if config["policy"]["merge"]["mode"] == "review-only" and (
+            existing is None or feature["stage"] != "MERGE_READY"
+        ):
+            raise WorkflowError(
+                "invalid_transition",
+                "Review-only AGILE merge proof requires prior exact-head READY",
+            )
+        feature["pullRequest"] = pull
+        feature["agileVerification"] = existing or verification
+        feature["merge"] = merge
+        touch(feature, "MERGED")
+        touch(feature, "RELEASE_AWAITING_AUTHORIZATION")
+        save_state(paths, state, config)
+    return {
+        "ok": True,
+        "duplicate": False,
+        "verification": feature["agileVerification"],
+        "merge": merge,
+        "stage": feature["stage"],
+    }
+
+
 def command_prepare_code_review(args: argparse.Namespace) -> dict[str, Any]:
     repository, paths, config, _ = load_context(args.repo)
     require_role(config, args.task_id, "main")
     with locked(paths["lock"]):
         state = validate_state(load_json(paths["state"], "state"), config)
         feature = feature_for(state, args.feature_id)
+        if feature["deliveryMode"] == "AGILE":
+            raise WorkflowError(
+                "invalid_transition",
+                "AGILE uses Main verification instead of independent code review",
+            )
         if feature["stage"] != "DEVELOPMENT_COMPLETE":
             raise WorkflowError(
                 "invalid_transition", "Development must complete before code review"
@@ -3740,6 +4326,7 @@ def command_prepare_code_review(args: argparse.Namespace) -> dict[str, Any]:
             "headSha": head_sha,
         }
         body = {
+            "deliveryMode": feature["deliveryMode"],
             "pullRequest": pull,
             "reviewRecordBranch": branch,
             "mergePolicy": config["policy"]["merge"],
@@ -3770,6 +4357,10 @@ def command_accept_code_review(args: argparse.Namespace) -> dict[str, Any]:
         duplicate: bool,
     ) -> None:
         feature = feature_for(state, payload["featureId"])
+        if feature["deliveryMode"] != payload["body"].get("deliveryMode", "STRICT"):
+            raise WorkflowError(
+                "snapshot_mismatch", "Code request DeliveryMode differs from feature"
+            )
         if feature.get("pendingCodeRequestId") != payload["messageId"]:
             raise WorkflowError(
                 "stale_result", "Code request is not the latest pending snapshot"
@@ -3839,6 +4430,7 @@ def command_prepare_code_result(args: argparse.Namespace) -> dict[str, Any]:
     request = validate_message_base(
         load_payload(args.request_file), "CodeReviewRequest", config, "main", "review"
     )
+    delivery_mode = request["body"].get("deliveryMode", "STRICT")
     findings = {
         "blocker": require_int(args.blockers, "blockers"),
         "major": require_int(args.majors, "majors"),
@@ -3847,6 +4439,24 @@ def command_prepare_code_result(args: argparse.Namespace) -> dict[str, Any]:
     if args.decision == "APPROVE" and findings["blocker"]:
         raise WorkflowError(
             "invalid_payload", "APPROVE cannot contain blocker findings"
+        )
+    if (
+        delivery_mode == "AGILE_REVIEWED"
+        and args.decision == "REQUEST_CHANGES"
+        and not findings["blocker"]
+    ):
+        raise WorkflowError(
+            "invalid_payload",
+            "AGILE_REVIEWED may request changes only for critical/blocker findings",
+        )
+    if (
+        delivery_mode == "AGILE_REVIEWED"
+        and args.decision == "COMMENT"
+        and args.merge_status != "STALE"
+    ):
+        raise WorkflowError(
+            "invalid_payload",
+            "AGILE_REVIEWED COMMENT is reserved for a stale exact-head snapshot",
         )
     report = report_from_args(args, repository)
     if report["branch"] != request["body"]["reviewRecordBranch"]:
@@ -3896,6 +4506,7 @@ def command_prepare_code_result(args: argparse.Namespace) -> dict[str, Any]:
     elif args.merge_status not in {"READY", "NOT_REQUESTED", "STALE"}:
         raise WorkflowError("invalid_payload", "Unsupported merge status")
     body = {
+        "deliveryMode": delivery_mode,
         "requestMessageId": request["messageId"],
         "reviewedPullRequest": request["body"]["pullRequest"],
         "decision": args.decision,
@@ -3922,6 +4533,10 @@ def command_prepare_code_result(args: argparse.Namespace) -> dict[str, Any]:
                 "invalid_transition", "Code request was not accepted for review"
             )
         feature = feature_for(state, request["featureId"])
+        if feature["deliveryMode"] != delivery_mode:
+            raise WorkflowError(
+                "snapshot_mismatch", "Code request DeliveryMode differs from feature"
+            )
         if feature.get("pendingCodeRequestId") != request["messageId"]:
             raise WorkflowError(
                 "stale_result", "Code request is not the latest pending snapshot"
@@ -3961,11 +4576,17 @@ def command_apply_code_result(args: argparse.Namespace) -> dict[str, Any]:
             "merge",
             "summary",
         },
+        {"deliveryMode"},
     )
     validate_report(body["report"], "CodeReviewResult.body.report", repository["root"])
     with locked(paths["lock"]):
         state = validate_state(load_json(paths["state"], "state"), config)
         feature = feature_for(state, result["featureId"])
+        delivery_mode = body.get("deliveryMode", "STRICT")
+        if feature["deliveryMode"] != delivery_mode:
+            raise WorkflowError(
+                "snapshot_mismatch", "Code result DeliveryMode differs from feature"
+            )
         if feature.get("pendingCodeRequestId") != body["requestMessageId"]:
             raise WorkflowError(
                 "stale_result", "Code result does not match pending request"
@@ -3973,6 +4594,10 @@ def command_apply_code_result(args: argparse.Namespace) -> dict[str, Any]:
         request = dispatch_for(state, body["requestMessageId"], "CodeReviewRequest")[
             "payload"
         ]
+        if request["body"].get("deliveryMode", "STRICT") != delivery_mode:
+            raise WorkflowError(
+                "snapshot_mismatch", "Code result DeliveryMode differs from request"
+            )
         if body["reviewedPullRequest"] != request["body"]["pullRequest"]:
             raise WorkflowError(
                 "snapshot_mismatch", "Code result reviewed another PR snapshot"
@@ -4032,6 +4657,13 @@ def command_apply_code_result(args: argparse.Namespace) -> dict[str, Any]:
                 decision in {"REQUEST_CHANGES", "COMMENT"}
                 and merge_status == "NOT_REQUESTED"
             ):
+                if delivery_mode == "AGILE_REVIEWED" and (
+                    decision != "REQUEST_CHANGES" or not body["findings"]["blocker"]
+                ):
+                    raise WorkflowError(
+                        "invalid_transition",
+                        "AGILE_REVIEWED remediation requires a critical/blocker finding",
+                    )
                 feature["codeResultMessageId"] = result["messageId"]
                 touch(feature, "CODE_CHANGES_REQUESTED")
                 add_queue(state, feature["featureId"])
@@ -4144,9 +4776,7 @@ def no_publish_acceptance_authority(
         "featureId": require_feature_id(args.feature_id),
         "mergeCommitSha": require_sha(args.merge_commit_sha, "mergeCommitSha"),
         "reason": require_string(args.reason, "reason", maximum=300),
-        "authorizedBy": require_string(
-            args.authorized_by, "authorizedBy", maximum=200
-        ),
+        "authorizedBy": require_string(args.authorized_by, "authorizedBy", maximum=200),
         "authorizationSourceThreadId": require_string(
             args.authorization_source_thread_id,
             "authorizationSourceThreadId",
@@ -4769,8 +5399,17 @@ def command_close_feature(args: argparse.Namespace) -> dict[str, Any]:
             )
         closure: dict[str, Any] = {
             "requirementsMessageId": feature.get("requirementsMessageId", ""),
-            "planReviewResultMessageId": feature.get("planResultMessageId", ""),
-            "codeReviewResultMessageId": feature.get("codeResultMessageId", ""),
+            "deliveryMode": feature["deliveryMode"],
+            "developmentAuthorityId": (
+                feature.get("planResultMessageId", "")
+                if feature["deliveryMode"] == "STRICT"
+                else feature.get("agilePlanAuthority", {}).get("authorityId", "")
+            ),
+            "deliveryAuthorityId": (
+                feature.get("agileVerification", {}).get("authorityId", "")
+                if feature["deliveryMode"] == "AGILE"
+                else feature.get("codeResultMessageId", "")
+            ),
             "mergeCommitSha": feature["merge"]["mergeCommitSha"],
             "scenariosSolved": [
                 require_string(item, "scenario", maximum=300) for item in args.scenario
@@ -4789,9 +5428,7 @@ def command_close_feature(args: argparse.Namespace) -> dict[str, Any]:
             closure.update(
                 {
                     "releaseResultId": release["proofDigest"],
-                    "releaseTargets": [
-                        item["targetId"] for item in release["targets"]
-                    ],
+                    "releaseTargets": [item["targetId"] for item in release["targets"]],
                 }
             )
         else:
@@ -4803,7 +5440,7 @@ def command_close_feature(args: argparse.Namespace) -> dict[str, Any]:
                     "releaseTargets": [],
                 }
             )
-        for name in ("planReviewResultMessageId", "codeReviewResultMessageId"):
+        for name in ("developmentAuthorityId", "deliveryAuthorityId"):
             require_digest(closure[name], name)
         require_digest(closure["requirementsMessageId"], "requirementsMessageId")
         closure["closureId"] = digest(closure)
@@ -4863,6 +5500,7 @@ def build_parser() -> argparse.ArgumentParser:
     req.add_argument("--feature-id", required=True)
     req.add_argument("--title", required=True)
     req.add_argument("--branch", required=True)
+    req.add_argument("--delivery-mode", choices=DELIVERY_MODES, required=True)
     req.add_argument("--requirements-path", required=True)
     req.add_argument("--requirements-commit-sha", required=True)
     req.add_argument("--confirmation-evidence", required=True)
@@ -4888,6 +5526,17 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--implementation-plan-path", required=True)
     plan.add_argument("--acceptance-criteria-digest", required=True)
     plan.add_argument("--previous-result-message-id")
+
+    agile_plan = add_repo(
+        "queue-agile-development",
+        "Bind a committed plan and queue a non-strict feature",
+    )
+    agile_plan.add_argument("--feature-id", required=True)
+    agile_plan.add_argument("--plan-commit-sha", required=True)
+    agile_plan.add_argument("--requirements-path", required=True)
+    agile_plan.add_argument("--design-path", required=True)
+    agile_plan.add_argument("--implementation-plan-path", required=True)
+    agile_plan.add_argument("--acceptance-criteria-digest", required=True)
 
     accept_plan = add_repo("accept-plan-review", "Accept technical plan request")
     accept_plan.add_argument("--payload-file", required=True)
@@ -4931,6 +5580,29 @@ def build_parser() -> argparse.ArgumentParser:
     abandon.add_argument("--authorization-source-thread-id", required=True)
     abandon.add_argument("--authorization-evidence", required=True)
     abandon.add_argument("--superseded-by-feature-id", required=True)
+
+    agile_verify = add_repo(
+        "record-agile-verification",
+        "Record AGILE exact-head verification and merge proof",
+    )
+    agile_verify.add_argument("--feature-id", required=True)
+    agile_verify.add_argument("--pr-number", type=int, required=True)
+    agile_verify.add_argument("--pr-url", required=True)
+    agile_verify.add_argument("--base-ref", required=True)
+    agile_verify.add_argument("--base-sha", required=True)
+    agile_verify.add_argument("--head-ref", required=True)
+    agile_verify.add_argument("--head-sha", required=True)
+    agile_verify.add_argument("--checks-checked-at", required=True)
+    agile_verify.add_argument("--checks-url")
+    agile_verify.add_argument("--core-journey-evidence", required=True)
+    agile_verify.add_argument("--summary", required=True)
+    agile_verify.add_argument(
+        "--merge-status", choices=("READY", "MERGED"), required=True
+    )
+    agile_verify.add_argument("--merge-method", choices=MERGE_METHODS)
+    agile_verify.add_argument("--merge-url")
+    agile_verify.add_argument("--merge-sha")
+    agile_verify.add_argument("--merged-at")
 
     code = add_repo("prepare-code-review", "Prepare exact-head code review")
     code.add_argument("--feature-id", required=True)
@@ -5023,6 +5695,7 @@ def main() -> int:
         "mark-delivery-failed": lambda item: command_mark_dispatch(item, True),
         "accept-requirements": command_accept_requirements,
         "prepare-plan-review": command_prepare_plan_review,
+        "queue-agile-development": command_queue_agile_development,
         "accept-plan-review": command_accept_plan_review,
         "prepare-plan-result": command_prepare_plan_result,
         "apply-plan-result": command_apply_plan_result,
@@ -5031,6 +5704,7 @@ def main() -> int:
         "resume-development": lambda item: command_goal_transition(item, "resume"),
         "complete-development": lambda item: command_goal_transition(item, "complete"),
         "abandon-development": command_abandon_development,
+        "record-agile-verification": command_record_agile_verification,
         "prepare-code-review": command_prepare_code_review,
         "accept-code-review": command_accept_code_review,
         "prepare-code-result": command_prepare_code_result,

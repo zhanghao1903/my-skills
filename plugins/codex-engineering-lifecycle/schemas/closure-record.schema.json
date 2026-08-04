@@ -4,11 +4,14 @@
   "title": "ClosureRecord",
   "type": "object",
   "additionalProperties": false,
-  "required": ["requirementsMessageId", "planReviewResultMessageId", "codeReviewResultMessageId", "mergeCommitSha", "releaseTargets", "scenariosSolved", "followUps", "closedAt", "closureId"],
+  "required": ["requirementsMessageId", "mergeCommitSha", "releaseTargets", "scenariosSolved", "followUps", "closedAt", "closureId"],
   "properties": {
     "disposition": {"const": "ACCEPTED_NO_PUBLISH"},
     "acceptanceId": {"$ref": "#/$defs/digest"},
     "releaseResultId": {"$ref": "#/$defs/digest"},
+    "deliveryMode": {"enum": ["AGILE", "AGILE_REVIEWED", "STRICT"]},
+    "developmentAuthorityId": {"$ref": "#/$defs/digest"},
+    "deliveryAuthorityId": {"$ref": "#/$defs/digest"},
     "requirementsMessageId": {"$ref": "#/$defs/digest"},
     "planReviewResultMessageId": {"$ref": "#/$defs/digest"},
     "codeReviewResultMessageId": {"$ref": "#/$defs/digest"},
@@ -19,16 +22,32 @@
     "closedAt": {"$ref": "#/$defs/timestamp"},
     "closureId": {"$ref": "#/$defs/digest"}
   },
-  "oneOf": [
+  "allOf": [
     {
-      "required": ["releaseResultId"],
-      "not": {"anyOf": [{"required": ["disposition"]}, {"required": ["acceptanceId"]}]},
-      "properties": {"releaseTargets": {"minItems": 1}}
+      "oneOf": [
+        {
+          "required": ["planReviewResultMessageId", "codeReviewResultMessageId"],
+          "not": {"anyOf": [{"required": ["deliveryMode"]}, {"required": ["developmentAuthorityId"]}, {"required": ["deliveryAuthorityId"]}]}
+        },
+        {
+          "required": ["deliveryMode", "developmentAuthorityId", "deliveryAuthorityId"],
+          "not": {"anyOf": [{"required": ["planReviewResultMessageId"]}, {"required": ["codeReviewResultMessageId"]}]}
+        }
+      ]
     },
     {
-      "required": ["disposition", "acceptanceId"],
-      "not": {"required": ["releaseResultId"]},
-      "properties": {"releaseTargets": {"maxItems": 0}}
+      "oneOf": [
+        {
+          "required": ["releaseResultId"],
+          "not": {"anyOf": [{"required": ["disposition"]}, {"required": ["acceptanceId"]}]},
+          "properties": {"releaseTargets": {"minItems": 1}}
+        },
+        {
+          "required": ["disposition", "acceptanceId"],
+          "not": {"required": ["releaseResultId"]},
+          "properties": {"releaseTargets": {"maxItems": 0}}
+        }
+      ]
     }
   ],
   "$defs": {

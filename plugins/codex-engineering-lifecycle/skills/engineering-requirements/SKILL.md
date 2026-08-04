@@ -7,7 +7,9 @@ description: Run the Requirements role of an initialized Codex Engineering Lifec
 
 Turn a feature request into a confirmed, committed, immutable handoff. Read
 [requirements-contract.md](references/requirements-contract.md) before preparing
-or retrying a handoff. Use
+or retrying a handoff, and read
+[delivery-modes.md](../../references/delivery-modes.md) before discussing or
+confirming delivery policy. Use
 [requirements-template.md](assets/requirements-template.md) for new documents.
 
 ## Role gate
@@ -39,19 +41,24 @@ confirmation, handoff preparation, or retry.
 - Create `docs/feature/<feature-slug>/requirements.md` on a dedicated
   `codex/<feature-slug>` branch.
 - Keep status `Draft` until explicit user confirmation.
+- Present `AGILE`, `AGILE_REVIEWED`, and `STRICT` with their exact review
+  trade-offs. Require the user to select one exact mode; never infer or silently
+  default it.
 - Do not write design, architecture, implementation plan, code, tests, or
   release implementation.
 
 ## Confirmation
 
-Show the complete requirements snapshot and ask for explicit confirmation.
+Show the complete requirements snapshot, including `DeliveryMode`, and ask for
+explicit confirmation that names the same exact mode. A generic "confirmed" is
+insufficient when no mode was named in the confirmation exchange.
 Revisions invalidate prior confirmation.
 
 When confirmed:
 
 1. set the exact metadata fields required by the template:
-   `Status: Confirmed`, `FeatureId`, `Branch`, `ConfirmedBy`, and a strict UTC
-   `ConfirmedAt`;
+   `Status: Confirmed`, `FeatureId`, `Branch`, `DeliveryMode`, `ConfirmedBy`,
+   and a strict UTC `ConfirmedAt`;
 2. run focused Markdown and repository checks;
 3. commit only the requirements phase;
 4. push the feature branch;
@@ -75,6 +82,7 @@ workflowctl.py prepare-requirements
   --feature-id <feature-id>
   --title <title>
   --branch <branch>
+  --delivery-mode <AGILE|AGILE_REVIEWED|STRICT>
   --requirements-path <path>
   --requirements-commit-sha <sha>
   --confirmation-evidence <bounded-summary>
@@ -101,6 +109,9 @@ retain the same deterministic payload for retry.
 - Treat `duplicate: true` as successful idempotency.
 - If the document, commit, branch, confirmation, workflow, or task route
   changes, prepare a new handoff.
+- Treat a mode change as a requirements revision that requires a new explicit
+  confirmation and committed snapshot. A durable feature cannot silently
+  change modes.
 - Never create two Main starts for one message ID.
 
 ## Refusals
@@ -112,5 +123,5 @@ Refuse and redirect:
 - implementation, finding remediation, release, and closure to Main;
 - direct merge requests to Review under its exact-head policy.
 
-End with the requirements path/commit, confirmation state, message ID, and
-delivery state.
+End with the selected mode, requirements path/commit, confirmation state,
+message ID, and delivery state.

@@ -8,12 +8,14 @@ separate hosted service.
 For each initialized repository it stores:
 
 - canonical repository and Git common-directory identity;
-- workflow, task, feature, message, GoalRun, authorization, and abandonment IDs;
+- workflow, task, feature, message, GoalRun, delivery-mode authority,
+  authorization, and abandonment IDs;
 - abandonment reason, superseding feature ID, authorization source task ID,
   and SHA-256 authorization evidence digest (not the raw authorization text);
 - role acknowledgements and configured Goal/merge/release policies;
-- lifecycle stages, queue state, paths, commit SHAs, SHA-256 digests, bounded
-  titles/summaries, timestamps, and sanitized errors;
+- selected delivery mode, lifecycle stages, queue state, paths, commit SHAs,
+  SHA-256 digests (including AGILE core-journey evidence rather than raw
+  evidence), bounded titles/summaries, timestamps, and sanitized errors;
 - merge, release-target, and closure proof metadata.
 
 The state root is:

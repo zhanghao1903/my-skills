@@ -1,16 +1,28 @@
 # Codex Engineering Lifecycle
 
 Codex Engineering Lifecycle is a repository-scoped plugin for feature delivery
-with three durable Codex tasks:
+with three durable Codex tasks and a per-feature delivery mode:
 
 - **Requirements** turns natural-language requests into a confirmed, committed
   requirements snapshot.
-- **Engineering Main** writes the technical plan, runs serialized Goal-mode
-  implementation and remediation, prepares the PR, records an explicitly
+- **Engineering Main** writes and binds the technical plan, runs serialized
+  Goal-mode implementation and remediation, prepares the PR, records an explicitly
   authorized release or no-publish acceptance, and closes the feature.
-- **Engineering Review** independently reviews technical plans and exact PR
-  heads, writes immutable review records, and merges only under the configured
-  policy.
+- **Engineering Review** independently reviews the snapshots routed by the
+  selected mode, writes immutable review records, and merges only under the
+  configured policy.
+
+Every requirements confirmation must explicitly select exactly one mode:
+
+- `AGILE`: Requirements + Main; no independent plan/code review. Main must
+  still bind a committed plan and record passing required CI plus the confirmed
+  core journey on the exact PR head.
+- `AGILE_REVIEWED`: Requirements + Main + weak Review; no plan review. Only
+  critical code findings block, while major/minor findings remain advisory.
+- `STRICT`: the original independent plan and code review lifecycle.
+
+Modes change review depth, not exact-head checks, merge policy, Goal
+serialization, release authorization, or durable history.
 
 The plugin packages `feature-lifecycle`, `product-workflow-gate`,
 `technical-plan-write`, `technical-plan-review`, and `pr-review`. Those
@@ -96,20 +108,22 @@ directly to Main or Review.
 
 ```text
 Natural-language request
-  → confirmed requirements
-  → technical plan
-  → independent plan review
+  → confirmed requirements + named DeliveryMode
+  → committed technical plan
+  → mode-specific plan authority
   → user notified that development starts
   → serialized GoalRun implementation
-  → exact-head code review and report
-  → findings remediation in a new GoalRun, when needed
+  → mode-specific exact-head verification or code review
+  → critical/strict findings remediation in a new GoalRun, when needed
   → policy-gated merge
   → exact release proposal or no-publish rationale and user authorization
   → GitHub Release/PyPI proof or acceptance-only authority
   → feature closure
 ```
 
-Plan and code failures return to Main. A completed GoalRun is never reopened;
+STRICT plan and code failures return to Main. AGILE_REVIEWED returns only
+critical/blocker findings for remediation; advisory findings do not create a
+GoalRun. A completed GoalRun is never reopened;
 code findings authorize a new `CODE_REMEDIATION` GoalRun. Only one GoalRun may
 be active across the workflow, so multiple features remain deterministic.
 When a user explicitly revokes a blocked objective in favor of a confirmed
@@ -131,7 +145,7 @@ configured gate passes.
 
 Main presents the exact version, tag, merge commit, target types, artifact
 names, and SHA-256 digests. The user must authorize that exact proposal.
-Supported publication targets in v0.1.2 are:
+Supported publication targets in v0.2.0 are:
 
 - GitHub Release for the bound repository;
 - PyPI or TestPyPI.
@@ -172,9 +186,11 @@ codex plugin add codex-engineering-lifecycle@my-skills
 Local state schema v1 is migrated under the state lock by reconstructing its
 deterministic release submission ledger; v2 and v3 are then migrated without
 semantic changes to v4. State v3 adds authorized Goal abandonment, while v4
-adds formal acceptance-only/no-publish authority. State is atomically
-persisted before use and validated before every mutation; incompatible future
-state is rejected rather than silently downgraded.
+adds formal acceptance-only/no-publish authority. State v4 is migrated to v5
+by assigning `STRICT`, which exactly preserves the only lifecycle supported by
+older versions. New features store their explicitly confirmed mode. State is
+atomically persisted before use and validated before every mutation;
+incompatible future state is rejected rather than silently downgraded.
 
 ## Uninstall
 

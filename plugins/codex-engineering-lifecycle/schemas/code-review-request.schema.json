@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["schemaVersion", "type", "workflowId", "messageId", "featureId", "repositoryKey", "routing", "cycle", "createdAt", "body"],
   "properties": {
-    "schemaVersion": {"const": 1},
+    "schemaVersion": {"const": 2},
     "type": {"const": "CodeReviewRequest"},
     "workflowId": {"type": "string", "format": "uuid"},
     "messageId": {"$ref": "#/$defs/digest"},
@@ -18,8 +18,9 @@
     "body": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["pullRequest", "reviewRecordBranch", "mergePolicy"],
+      "required": ["deliveryMode", "pullRequest", "reviewRecordBranch", "mergePolicy"],
       "properties": {
+        "deliveryMode": {"enum": ["AGILE_REVIEWED", "STRICT"]},
         "pullRequest": {"$ref": "#/$defs/pullRequest"},
         "reviewRecordBranch": {"type": "string", "pattern": "^codex/review-records/.+/code-[1-9][0-9]*-[0-9a-f]{12}$", "maxLength": 240},
         "mergePolicy": {"$ref": "#/$defs/mergePolicy"},

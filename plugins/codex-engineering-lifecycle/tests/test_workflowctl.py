@@ -93,7 +93,7 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
         stream = result.stdout if result.returncode == 0 else result.stderr
         return json.loads(stream)
 
-    def commit_feature_documents(self) -> str:
+    def commit_feature_documents(self, delivery_mode: str = "STRICT") -> str:
         self.git("checkout", "-b", self.feature_branch)
         self.write(
             "docs/feature/sample-feature/requirements.md",
@@ -104,6 +104,7 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
                     "- Status: Confirmed",
                     f"- FeatureId: {self.feature_id}",
                     f"- Branch: {self.feature_branch}",
+                    f"- DeliveryMode: {delivery_mode}",
                     "- ConfirmedBy: test-user",
                     "- ConfirmedAt: 2026-07-27T12:00:00Z",
                     "",
@@ -187,6 +188,8 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
             "Sample feature",
             "--branch",
             self.feature_branch,
+            "--delivery-mode",
+            "STRICT",
             "--requirements-path",
             "docs/feature/sample-feature/requirements.md",
             "--requirements-commit-sha",
@@ -263,6 +266,38 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
             "--payload-file",
             str(result_file),
         )
+
+    def accept_mode_requirements(self, plan_sha: str, delivery_mode: str) -> dict:
+        prepared = self.command(
+            "prepare-requirements",
+            "--task-id",
+            self.tasks["requirements"],
+            "--feature-id",
+            self.feature_id,
+            "--title",
+            "Sample feature",
+            "--branch",
+            self.feature_branch,
+            "--delivery-mode",
+            delivery_mode,
+            "--requirements-path",
+            "docs/feature/sample-feature/requirements.md",
+            "--requirements-commit-sha",
+            plan_sha,
+            "--confirmation-evidence",
+            f"User explicitly confirmed {delivery_mode} for this snapshot.",
+        )
+        payload = self.payload_file(
+            f"requirements-{delivery_mode.lower()}.json", prepared["message"]
+        )
+        accepted = self.command(
+            "accept-requirements",
+            "--task-id",
+            self.tasks["main"],
+            "--payload-file",
+            str(payload),
+        )
+        return {"prepared": prepared, "accepted": accepted}
 
     def add_review_report(
         self, branch: str, base_sha: str, relative: str, content: str
@@ -360,11 +395,11 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
         self.assertEqual(recovered["workflowId"], initialized["workflowId"])
         self.assertEqual(recovered["tasks"], self.tasks)
 
-    def test_state_v2_migrates_atomically_to_v4_without_semantic_change(self) -> None:
+    def test_state_v2_migrates_atomically_to_v5_with_strict_mode(self) -> None:
         initialized = self.initialize()
         state_path = Path(initialized["stateRoot"]) / "state.json"
         state_v2 = json.loads(state_path.read_bytes())
-        self.assertEqual(state_v2["schemaVersion"], 4)
+        self.assertEqual(state_v2["schemaVersion"], 5)
         state_v2["schemaVersion"] = 2
         state_path.write_text(json.dumps(state_v2), encoding="utf-8")
         expected = copy.deepcopy(state_v2)
@@ -374,17 +409,17 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
         status = self.command("status")
         self.assertTrue(status["initialized"])
         migrated = json.loads(state_path.read_bytes())
-        self.assertEqual(migrated["schemaVersion"], 4)
+        self.assertEqual(migrated["schemaVersion"], 5)
         actual = copy.deepcopy(migrated)
         actual.pop("schemaVersion")
         actual.pop("updatedAt")
         self.assertEqual(actual, expected)
 
-    def test_state_v3_migrates_atomically_to_v4_without_semantic_change(self) -> None:
+    def test_state_v3_migrates_atomically_to_v5_with_strict_mode(self) -> None:
         initialized = self.initialize()
         state_path = Path(initialized["stateRoot"]) / "state.json"
         state_v3 = json.loads(state_path.read_bytes())
-        self.assertEqual(state_v3["schemaVersion"], 4)
+        self.assertEqual(state_v3["schemaVersion"], 5)
         state_v3["schemaVersion"] = 3
         state_path.write_text(json.dumps(state_v3), encoding="utf-8")
         expected = copy.deepcopy(state_v3)
@@ -394,11 +429,35 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
         status = self.command("status")
         self.assertTrue(status["initialized"])
         migrated = json.loads(state_path.read_bytes())
-        self.assertEqual(migrated["schemaVersion"], 4)
+        self.assertEqual(migrated["schemaVersion"], 5)
         actual = copy.deepcopy(migrated)
         actual.pop("schemaVersion")
         actual.pop("updatedAt")
         self.assertEqual(actual, expected)
+
+    def test_state_v4_feature_migrates_to_strict_and_rejects_unknown_mode(self) -> None:
+        plan_sha = self.commit_feature_documents()
+        initialized = self.initialize()
+        self.ack_all()
+        self.accept_mode_requirements(plan_sha, "STRICT")
+        state_path = Path(initialized["stateRoot"]) / "state.json"
+        legacy = json.loads(state_path.read_bytes())
+        legacy["schemaVersion"] = 4
+        del legacy["features"][self.feature_id]["deliveryMode"]
+        state_path.write_text(json.dumps(legacy), encoding="utf-8")
+
+        status = self.command("status")
+        self.assertEqual(status["features"][self.feature_id]["deliveryMode"], "STRICT")
+        migrated = json.loads(state_path.read_bytes())
+        self.assertEqual(migrated["schemaVersion"], 5)
+        self.assertEqual(
+            migrated["features"][self.feature_id]["deliveryMode"], "STRICT"
+        )
+
+        migrated["features"][self.feature_id]["deliveryMode"] = "FAST"
+        state_path.write_text(json.dumps(migrated), encoding="utf-8")
+        invalid = self.command("status", expect=2)
+        self.assertEqual(invalid["error"]["kind"], "invalid_payload")
 
     def test_abandon_blocked_goal_is_authorized_terminal_and_idempotent(self) -> None:
         plan_sha = self.commit_feature_documents()
@@ -655,6 +714,8 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
             "Sample feature",
             "--branch",
             self.feature_branch,
+            "--delivery-mode",
+            "STRICT",
             "--requirements-path",
             "docs/feature/other/requirements.md",
             "--requirements-commit-sha",
@@ -687,6 +748,8 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
             "Sample feature",
             "--branch",
             self.feature_branch,
+            "--delivery-mode",
+            "STRICT",
             "--requirements-path",
             requirements_path,
             "--requirements-commit-sha",
@@ -707,6 +770,8 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
             "Sample feature",
             "--branch",
             self.feature_branch,
+            "--delivery-mode",
+            "STRICT",
             "--requirements-path",
             requirements_path,
             "--requirements-commit-sha",
@@ -726,6 +791,7 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
 - Status: Draft
 - FeatureId: conflicting-feature-abcdef012345
 - Branch: codex/conflicting-feature
+- DeliveryMode: STRICT
 - ConfirmedBy:
 - ConfirmedAt:
 """,
@@ -746,6 +812,8 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
             "Sample feature",
             "--branch",
             self.feature_branch,
+            "--delivery-mode",
+            "STRICT",
             "--requirements-path",
             requirements_path,
             "--requirements-commit-sha",
@@ -762,6 +830,411 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
             before_conflict,
         )
 
+    def test_agile_mode_requires_explicit_confirmation_and_skips_review(self) -> None:
+        plan_sha = self.commit_feature_documents("AGILE")
+        self.initialize()
+        self.ack_all()
+
+        environment = os.environ.copy()
+        environment["CODEX_HOME"] = str(self.codex_home)
+        missing_mode = subprocess.run(
+            [
+                "python3",
+                str(WORKFLOWCTL),
+                "prepare-requirements",
+                "--repo",
+                str(self.repo),
+                "--task-id",
+                self.tasks["requirements"],
+                "--feature-id",
+                self.feature_id,
+                "--title",
+                "Sample feature",
+                "--branch",
+                self.feature_branch,
+                "--requirements-path",
+                "docs/feature/sample-feature/requirements.md",
+                "--requirements-commit-sha",
+                plan_sha,
+                "--confirmation-evidence",
+                "User confirmed the snapshot.",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+            env=environment,
+        )
+        self.assertEqual(missing_mode.returncode, 2)
+        self.assertIn("--delivery-mode", missing_mode.stderr)
+
+        mismatched = self.command(
+            "prepare-requirements",
+            "--task-id",
+            self.tasks["requirements"],
+            "--feature-id",
+            self.feature_id,
+            "--title",
+            "Sample feature",
+            "--branch",
+            self.feature_branch,
+            "--delivery-mode",
+            "STRICT",
+            "--requirements-path",
+            "docs/feature/sample-feature/requirements.md",
+            "--requirements-commit-sha",
+            plan_sha,
+            "--confirmation-evidence",
+            "User confirmed AGILE.",
+            expect=2,
+        )
+        self.assertEqual(mismatched["error"]["kind"], "snapshot_mismatch")
+
+        handoff = self.accept_mode_requirements(plan_sha, "AGILE")
+        self.assertEqual(handoff["prepared"]["message"]["schemaVersion"], 2)
+        self.assertEqual(
+            handoff["prepared"]["message"]["body"]["deliveryMode"], "AGILE"
+        )
+        strict_review = self.command(
+            "prepare-plan-review",
+            "--task-id",
+            self.tasks["main"],
+            "--feature-id",
+            self.feature_id,
+            "--plan-commit-sha",
+            plan_sha,
+            "--requirements-path",
+            "docs/feature/sample-feature/requirements.md",
+            "--design-path",
+            "docs/feature/sample-feature/design.md",
+            "--implementation-plan-path",
+            "docs/feature/sample-feature/implementation-plan.md",
+            "--acceptance-criteria-digest",
+            "1" * 64,
+            expect=2,
+        )
+        self.assertEqual(strict_review["error"]["kind"], "invalid_transition")
+        queued = self.command(
+            "queue-agile-development",
+            "--task-id",
+            self.tasks["main"],
+            "--feature-id",
+            self.feature_id,
+            "--plan-commit-sha",
+            plan_sha,
+            "--requirements-path",
+            "docs/feature/sample-feature/requirements.md",
+            "--design-path",
+            "docs/feature/sample-feature/design.md",
+            "--implementation-plan-path",
+            "docs/feature/sample-feature/implementation-plan.md",
+            "--acceptance-criteria-digest",
+            "1" * 64,
+        )
+        self.assertEqual(queued["stage"], "DEVELOPMENT_QUEUED")
+        self.assertEqual(queued["authority"]["deliveryMode"], "AGILE")
+        objective = "Implement the confirmed AGILE feature and its core journey."
+        prepared_goal = self.command(
+            "start-development",
+            "--task-id",
+            self.tasks["main"],
+            "--feature-id",
+            self.feature_id,
+            "--objective",
+            objective,
+        )
+        goal_run_id = prepared_goal["goalRun"]["goalRunId"]
+        self.command(
+            "start-development",
+            "--task-id",
+            self.tasks["main"],
+            "--feature-id",
+            self.feature_id,
+            "--objective",
+            objective,
+            "--activate",
+            "--goal-run-id",
+            goal_run_id,
+            "--goal-thread-id",
+            self.tasks["main"],
+        )
+        completed = self.command(
+            "complete-development",
+            "--task-id",
+            self.tasks["main"],
+            "--feature-id",
+            self.feature_id,
+            "--goal-run-id",
+            goal_run_id,
+        )
+        self.assertEqual(completed["stage"], "DEVELOPMENT_COMPLETE")
+        independent_review = self.command(
+            "prepare-code-review",
+            "--task-id",
+            self.tasks["main"],
+            "--feature-id",
+            self.feature_id,
+            "--pr-number",
+            "7",
+            "--pr-url",
+            "https://github.com/example/project/pull/7",
+            "--base-ref",
+            "main",
+            "--base-sha",
+            plan_sha,
+            "--head-ref",
+            self.feature_branch,
+            "--head-sha",
+            plan_sha,
+            expect=2,
+        )
+        self.assertEqual(independent_review["error"]["kind"], "invalid_transition")
+        verification_args = (
+            "--task-id",
+            self.tasks["main"],
+            "--feature-id",
+            self.feature_id,
+            "--pr-number",
+            "7",
+            "--pr-url",
+            "https://github.com/example/project/pull/7",
+            "--base-ref",
+            "main",
+            "--base-sha",
+            plan_sha,
+            "--head-ref",
+            self.feature_branch,
+            "--head-sha",
+            plan_sha,
+            "--checks-checked-at",
+            "2026-07-27T12:10:00Z",
+            "--core-journey-evidence",
+            "Smoke test passed for the confirmed core journey.",
+            "--summary",
+            "Required CI and the core journey pass on the exact PR head.",
+        )
+        ready = self.command(
+            "record-agile-verification",
+            *verification_args,
+            "--merge-status",
+            "READY",
+        )
+        self.assertEqual(ready["stage"], "MERGE_READY")
+        merged = self.command(
+            "record-agile-verification",
+            *verification_args,
+            "--merge-status",
+            "MERGED",
+            "--merge-method",
+            "squash",
+            "--merge-url",
+            "https://github.com/example/project/pull/7",
+            "--merge-sha",
+            plan_sha,
+            "--merged-at",
+            "2026-07-27T12:12:00Z",
+        )
+        self.assertEqual(merged["stage"], "RELEASE_AWAITING_AUTHORIZATION")
+        merged_replay = self.command(
+            "record-agile-verification",
+            *verification_args,
+            "--merge-status",
+            "MERGED",
+            "--merge-method",
+            "squash",
+            "--merge-url",
+            "https://github.com/example/project/pull/7",
+            "--merge-sha",
+            plan_sha,
+            "--merged-at",
+            "2026-07-27T12:12:00Z",
+        )
+        self.assertTrue(merged_replay["duplicate"])
+        accepted = self.command(
+            "record-no-publish-acceptance",
+            "--task-id",
+            self.tasks["main"],
+            "--feature-id",
+            self.feature_id,
+            "--merge-commit-sha",
+            plan_sha,
+            "--reason",
+            "Confirmed scope has no publication target.",
+            "--authorized-by",
+            "test-user",
+            "--authorization-source-thread-id",
+            self.tasks["main"],
+            "--authorization-evidence",
+            "User explicitly accepted no publication for this exact merge.",
+        )
+        self.assertEqual(accepted["stage"], "ACCEPTED_NO_PUBLISH")
+        closed = self.command(
+            "close-feature",
+            "--task-id",
+            self.tasks["main"],
+            "--feature-id",
+            self.feature_id,
+            "--scenario",
+            "The core journey runs successfully.",
+        )
+        self.assertEqual(closed["stage"], "CLOSED")
+        self.assertEqual(closed["closure"]["deliveryMode"], "AGILE")
+        self.assertNotIn("planReviewResultMessageId", closed["closure"])
+        status = self.command("status")
+        self.assertEqual(status["features"][self.feature_id]["deliveryMode"], "AGILE")
+
+    def test_agile_reviewed_only_critical_findings_block(self) -> None:
+        plan_sha = self.commit_feature_documents("AGILE_REVIEWED")
+        self.initialize()
+        self.ack_all()
+        self.accept_mode_requirements(plan_sha, "AGILE_REVIEWED")
+        self.command(
+            "queue-agile-development",
+            "--task-id",
+            self.tasks["main"],
+            "--feature-id",
+            self.feature_id,
+            "--plan-commit-sha",
+            plan_sha,
+            "--requirements-path",
+            "docs/feature/sample-feature/requirements.md",
+            "--design-path",
+            "docs/feature/sample-feature/design.md",
+            "--implementation-plan-path",
+            "docs/feature/sample-feature/implementation-plan.md",
+            "--acceptance-criteria-digest",
+            "2" * 64,
+        )
+        objective = "Implement the confirmed AGILE_REVIEWED feature."
+        prepared = self.command(
+            "start-development",
+            "--task-id",
+            self.tasks["main"],
+            "--feature-id",
+            self.feature_id,
+            "--objective",
+            objective,
+        )
+        run_id = prepared["goalRun"]["goalRunId"]
+        self.command(
+            "start-development",
+            "--task-id",
+            self.tasks["main"],
+            "--feature-id",
+            self.feature_id,
+            "--objective",
+            objective,
+            "--activate",
+            "--goal-run-id",
+            run_id,
+            "--goal-thread-id",
+            self.tasks["main"],
+        )
+        self.command(
+            "complete-development",
+            "--task-id",
+            self.tasks["main"],
+            "--feature-id",
+            self.feature_id,
+            "--goal-run-id",
+            run_id,
+        )
+        review = self.command(
+            "prepare-code-review",
+            "--task-id",
+            self.tasks["main"],
+            "--feature-id",
+            self.feature_id,
+            "--pr-number",
+            "8",
+            "--pr-url",
+            "https://github.com/example/project/pull/8",
+            "--base-ref",
+            "main",
+            "--base-sha",
+            plan_sha,
+            "--head-ref",
+            self.feature_branch,
+            "--head-sha",
+            plan_sha,
+        )
+        self.assertEqual(review["message"]["body"]["deliveryMode"], "AGILE_REVIEWED")
+        request_file = self.payload_file(
+            "agile-reviewed-request.json", review["message"]
+        )
+        self.command(
+            "accept-code-review",
+            "--task-id",
+            self.tasks["review"],
+            "--payload-file",
+            str(request_file),
+        )
+        report_branch = review["message"]["body"]["reviewRecordBranch"]
+        report_commit, report_digest = self.add_review_report(
+            report_branch,
+            plan_sha,
+            "docs/reviews/agile-reviewed.md",
+            "# Weak Code Review\n\nTwo advisory findings; no critical finding.\n",
+        )
+        result_args = (
+            "--task-id",
+            self.tasks["review"],
+            "--request-file",
+            str(request_file),
+            "--report-branch",
+            report_branch,
+            "--report-path",
+            "docs/reviews/agile-reviewed.md",
+            "--report-commit-sha",
+            report_commit,
+            "--report-sha256",
+            report_digest,
+            "--checks-status",
+            "PASSING",
+            "--checks-checked-at",
+            "2026-07-27T13:00:00Z",
+        )
+        advisory_rejection = self.command(
+            "prepare-code-result",
+            *result_args,
+            "--decision",
+            "REQUEST_CHANGES",
+            "--majors",
+            "2",
+            "--merge-status",
+            "NOT_REQUESTED",
+            "--summary",
+            "Only advisory findings exist.",
+            expect=2,
+        )
+        self.assertEqual(advisory_rejection["error"]["kind"], "invalid_payload")
+        approved = self.command(
+            "prepare-code-result",
+            *result_args,
+            "--decision",
+            "APPROVE",
+            "--majors",
+            "2",
+            "--minors",
+            "1",
+            "--merge-status",
+            "READY",
+            "--summary",
+            "No critical issue; advisory findings are recorded for follow-up.",
+        )
+        self.assertEqual(approved["message"]["body"]["findings"]["major"], 2)
+        result_file = self.payload_file(
+            "agile-reviewed-result.json", approved["message"]
+        )
+        applied = self.command(
+            "apply-code-result",
+            "--task-id",
+            self.tasks["main"],
+            "--payload-file",
+            str(result_file),
+        )
+        self.assertEqual(applied["stage"], "MERGE_READY")
+        self.assertEqual(self.command("status")["developmentQueue"], [])
+
     def test_full_lifecycle_with_blocked_goal_and_partial_release_retry(self) -> None:
         plan_sha = self.commit_feature_documents()
         init = self.initialize()
@@ -776,6 +1249,8 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
             "Sample feature",
             "--branch",
             self.feature_branch,
+            "--delivery-mode",
+            "STRICT",
             "--requirements-path",
             "docs/feature/sample-feature/requirements.md",
             "--requirements-commit-sha",
@@ -810,6 +1285,8 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
             "Sample feature",
             "--branch",
             self.feature_branch,
+            "--delivery-mode",
+            "STRICT",
             "--requirements-path",
             "docs/feature/sample-feature/requirements.md",
             "--requirements-commit-sha",
@@ -1473,9 +1950,7 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
         self.assertEqual(
             acceptance["acceptanceId"], WORKFLOW_MODULE.digest(expected_authority)
         )
-        self.assertNotIn(
-            acceptance_evidence, state_path.read_text(encoding="utf-8")
-        )
+        self.assertNotIn(acceptance_evidence, state_path.read_text(encoding="utf-8"))
 
         accepted_state = state_path.read_bytes()
         duplicate_acceptance = self.command(
@@ -1496,9 +1971,7 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
             *conflicting_args,
             expect=2,
         )
-        self.assertEqual(
-            conflicting_acceptance["error"]["kind"], "replay_conflict"
-        )
+        self.assertEqual(conflicting_acceptance["error"]["kind"], "replay_conflict")
         self.assertEqual(state_path.read_bytes(), accepted_state)
 
         accepted_closure = self.command(
@@ -1741,7 +2214,7 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
             migrated_status["features"][self.feature_id]["stage"], "RELEASED"
         )
         migrated_state = json.loads(state_path.read_bytes())
-        self.assertEqual(migrated_state["schemaVersion"], 4)
+        self.assertEqual(migrated_state["schemaVersion"], 5)
         self.assertEqual(
             len(migrated_state["features"][self.feature_id]["release"]["submissions"]),
             2,
