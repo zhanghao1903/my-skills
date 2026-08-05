@@ -8,6 +8,7 @@ Personal Codex plugins and skills collected in one repository.
 plugins/
   codex-feature-lifecycle/
   codex-engineering-lifecycle/
+  idea-validation-workflow/
 skills/
   feature-lifecycle/
   local-wechat-send-smoke/
@@ -31,6 +32,7 @@ examples, or attribution files under `skills/`.
 | --- | --- |
 | [`codex-feature-lifecycle`](plugins/codex-feature-lifecycle/README.md) | Coordinate requirements confirmation, feature implementation, independent PR review, finding remediation, re-review, and merge through three dedicated Codex tasks. |
 | [`codex-engineering-lifecycle`](plugins/codex-engineering-lifecycle/README.md) | Run the heavier requirements, technical-plan, Goal-mode implementation, independent plan/code review, merge, release, and closure workflow through three dedicated Codex tasks. |
+| [`idea-validation-workflow`](plugins/idea-validation-workflow/README.md) | Guide proposers and executors through safe Idea capture, clarification, explicit promotion, execution facts, structured reports, idempotent recovery, and human-governed handoff. |
 
 ## Skill Index
 
@@ -75,6 +77,29 @@ Start a new Codex task after installation, then invoke
 `$codex-workflow-init` from the repository where the workflow should run. Init
 creates or binds three durable tasks: Requirements, Main Work, and PR Review &
 Merge. Send each new feature request to the configured Requirements task first.
+
+Install the Idea Validation Workflow plugin:
+
+```bash
+codex plugin add idea-validation-workflow@my-skills
+```
+
+Start a new Codex task after installation, securely configure an
+IdeaTrace-compatible API base URL and AI bearer credential, then invoke
+`$idea-validation-workflow` with the proposer's natural-language Idea or the
+executor's project update.
+
+The same plugin is available in Claude Code through its native marketplace:
+
+```text
+/plugin marketplace add zhanghao1903/my-skills
+/plugin install idea-validation-workflow@my-skills
+/reload-plugins
+```
+
+Invoke it as `/idea-validation-workflow:idea-validation-workflow`. Codex and
+Claude Code load the same Skill files; only their marketplace manifests and
+invocation syntax differ.
 
 ## Local Install
 
