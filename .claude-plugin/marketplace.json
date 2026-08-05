@@ -9,7 +9,7 @@
     {
       "name": "idea-validation-workflow",
       "source": "./plugins/idea-validation-workflow",
-      "description": "Safely capture, clarify, promote, execute, and review Ideas through an IdeaTrace API."
+      "description": "Securely initialize an IdeaTrace client, then capture, clarify, promote, execute, and review Ideas."
     }
   ]
 }
