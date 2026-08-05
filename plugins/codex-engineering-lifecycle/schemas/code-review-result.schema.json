@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["schemaVersion", "type", "workflowId", "messageId", "featureId", "repositoryKey", "routing", "cycle", "createdAt", "body"],
   "properties": {
-    "schemaVersion": {"const": 1},
+    "schemaVersion": {"const": 2},
     "type": {"const": "CodeReviewResult"},
     "workflowId": {"type": "string", "format": "uuid"},
     "messageId": {"$ref": "#/$defs/digest"},
@@ -18,8 +18,9 @@
     "body": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["requestMessageId", "reviewedPullRequest", "decision", "findings", "report", "checks", "merge", "summary"],
+      "required": ["deliveryMode", "requestMessageId", "reviewedPullRequest", "decision", "findings", "report", "checks", "merge", "summary"],
       "properties": {
+        "deliveryMode": {"enum": ["AGILE_REVIEWED", "STRICT"]},
         "requestMessageId": {"$ref": "#/$defs/digest"},
         "reviewedPullRequest": {"$ref": "#/$defs/pullRequest"},
         "decision": {"enum": ["APPROVE", "COMMENT", "REQUEST_CHANGES"]},
@@ -40,6 +41,35 @@
             "properties": {
               "decision": {"const": "APPROVE"},
               "checks": {"properties": {"status": {"const": "PASSING"}}}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "deliveryMode": {"const": "AGILE_REVIEWED"},
+              "merge": {"properties": {"status": {"const": "NOT_REQUESTED"}}, "required": ["status"]}
+            },
+            "required": ["deliveryMode", "merge"]
+          },
+          "then": {
+            "properties": {
+              "decision": {"const": "REQUEST_CHANGES"},
+              "findings": {"properties": {"blocker": {"minimum": 1}}}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "deliveryMode": {"const": "AGILE_REVIEWED"},
+              "decision": {"const": "COMMENT"}
+            },
+            "required": ["deliveryMode", "decision"]
+          },
+          "then": {
+            "properties": {
+              "merge": {"properties": {"status": {"const": "STALE"}}}
             }
           }
         }

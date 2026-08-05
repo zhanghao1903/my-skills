@@ -3,6 +3,7 @@
 - Status: Draft
 - FeatureId: <feature-slug>-<12 lowercase hex>
 - Branch: codex/<feature-slug>
+- DeliveryMode: <AGILE|AGILE_REVIEWED|STRICT>
 - ConfirmedBy:
 - ConfirmedAt:
 

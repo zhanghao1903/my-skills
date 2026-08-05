@@ -8,16 +8,20 @@ Use exact fields near the top of the requirements Markdown:
 - Status: Draft|Confirmed
 - FeatureId: <lowercase-slug>-<12 lowercase hex>
 - Branch: codex/<feature-slug>
+- DeliveryMode: AGILE|AGILE_REVIEWED|STRICT
 - ConfirmedBy: <user label or empty while Draft>
 - ConfirmedAt: <strict RFC3339 UTC Z or empty while Draft>
 ```
 
-The five lines form one ordered, contiguous metadata block within the first
+The six lines form one ordered, contiguous metadata block within the first
 40 lines. Each field appears exactly once in the entire document. Duplicate,
 reordered, separated, or later shadow metadata is malformed and cannot carry
 confirmation authority.
 
 The helper reads the committed document and requires all confirmed fields.
+It also requires the explicit `--delivery-mode` command value to match the
+committed metadata. The confirmation exchange must name the same exact mode;
+Requirements may not infer a default.
 Revisions after confirmation must return status to Draft until reconfirmed.
 The branch and path are deterministic:
 
@@ -46,6 +50,7 @@ Do not include technical design or an implementation plan.
 
 - workflow/repository and exact task route;
 - feature ID, title, branch;
+- immutable delivery mode;
 - document path, commit SHA, and SHA-256;
 - exact canonical `origin` branch tip at that commit;
 - confirmed user/timestamp/evidence;

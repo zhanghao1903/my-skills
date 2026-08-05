@@ -4,16 +4,16 @@
 
 | Stage | Main action |
 | --- | --- |
-| `REQUIREMENTS_CONFIRMED` | Author requirements/design/implementation plan |
+| `REQUIREMENTS_CONFIRMED` | Read immutable `DeliveryMode`; author design/implementation plan |
 | `PLAN_REVIEW_PENDING` | Wait for exact Review result |
 | `PLAN_CHANGES_REQUESTED` | Remediate findings and dispatch next plan cycle |
 | `PLAN_APPROVED` / `DEVELOPMENT_QUEUED` | Prepare and activate initial GoalRun when slot is free |
 | `DEVELOPMENT_ACTIVE` | Continue the active Goal only |
 | `DEVELOPMENT_BLOCKED` | Wait for user/external recovery, then resume same blocked run |
 | `DEVELOPMENT_ABANDONED` | Terminal: retain authority/history and continue only through the queued superseding feature |
-| `DEVELOPMENT_COMPLETE` | Prepare exact-head code review |
+| `DEVELOPMENT_COMPLETE` | AGILE: record CI/core-journey verification; reviewed modes: prepare code review |
 | `CODE_CHANGES_REQUESTED` | Queue a new remediation GoalRun |
-| `MERGE_READY` | Under review-only, wait for an external merge owner and Review's observed proof |
+| `MERGE_READY` | Under review-only, wait for an external merge owner and record mode-appropriate observed proof |
 | `MERGED` | Reconcile confirmed publication scope |
 | `RELEASE_AWAITING_AUTHORIZATION` | Wait for exact release or no-publish authorization |
 | `RELEASE_AUTHORIZED` / `RELEASE_FAILED` | Publish or retry authorized targets |
@@ -29,14 +29,17 @@ All three artifacts must exist at one commit:
 - `implementation-plan.md`.
 
 The helper computes individual digests and a canonical composite digest.
-Review approval applies only to that commit and composite digest.
+STRICT Review approval applies only to that commit and composite digest. For
+AGILE or AGILE_REVIEWED, `queue-agile-development` binds the same snapshot to
+confirmed-mode authority without creating a Review result.
 Every plan or code review cycle after the first must include the exact latest
 result message ID; it may not skip or substitute prior review authority.
 
 ## GoalRun
 
-The initial run is bound to the PASS plan result. A remediation run is bound to
-the exact code-review REQUEST_CHANGES result and cycle. The objective must name
+The initial run is bound to the STRICT PASS result or confirmed-mode plan
+authority. A remediation run is bound to the exact code-review REQUEST_CHANGES
+result and cycle. The objective must name
 the feature, branch, artifacts, required implementation/tests/docs/changelog/PR,
 and genuine completion condition.
 
@@ -47,6 +50,11 @@ Use the same `start-development` command twice:
 
 If platform Goal creation fails, leave PREPARED and retry idempotently. Never
 create a second Goal for the same run ID.
+
+AGILE_REVIEWED remediation is valid only for a critical/blocker finding.
+Advisory major/minor findings never create a GoalRun. AGILE has no code-review
+remediation cycle; Main must instead satisfy required CI and the core journey
+before recording `AGILE_SELF_VERIFICATION`.
 
 If the user explicitly revokes a blocked objective and authorizes a confirmed
 queued feature to supersede it, use `abandon-development` with the exact

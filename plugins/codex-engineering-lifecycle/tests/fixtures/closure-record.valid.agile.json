@@ -1,0 +1,14 @@
+{
+  "requirementsMessageId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "deliveryMode": "AGILE",
+  "developmentAuthorityId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "deliveryAuthorityId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "mergeCommitSha": "dddddddddddddddddddddddddddddddddddddddd",
+  "disposition": "ACCEPTED_NO_PUBLISH",
+  "acceptanceId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "releaseTargets": [],
+  "scenariosSolved": ["The confirmed core journey passes."],
+  "followUps": ["Consider advisory improvements later."],
+  "closedAt": "2026-08-05T12:00:00Z",
+  "closureId": "800eb30d8f2ce944bf5c9aa8ca5ceee759cc08197b330d7f5053a0ffa96ea270"
+}

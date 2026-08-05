@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["schemaVersion", "type", "workflowId", "messageId", "featureId", "repositoryKey", "routing", "cycle", "createdAt", "body"],
   "properties": {
-    "schemaVersion": {"const": 1},
+    "schemaVersion": {"const": 2},
     "type": {"const": "RequirementsHandoff"},
     "workflowId": {"type": "string", "format": "uuid"},
     "messageId": {"$ref": "#/$defs/digest"},
@@ -18,10 +18,11 @@
     "body": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["title", "branch", "requirements", "confirmation"],
+      "required": ["title", "branch", "deliveryMode", "requirements", "confirmation"],
       "properties": {
         "title": {"type": "string", "minLength": 1, "maxLength": 200},
         "branch": {"type": "string", "minLength": 1, "maxLength": 240},
+        "deliveryMode": {"enum": ["AGILE", "AGILE_REVIEWED", "STRICT"]},
         "requirements": {"$ref": "#/$defs/artifact"},
         "confirmation": {
           "type": "object",

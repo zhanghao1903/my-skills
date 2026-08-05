@@ -5,6 +5,9 @@
 `TechnicalPlanReviewRequest` binds one plan commit/composite digest.
 `CodeReviewRequest` binds one PR number, base SHA, and head SHA. Accept only the
 configured Main-to-Review route and latest expected cycle.
+Both bind `DeliveryMode`. Plan requests are valid only for `STRICT`; code
+requests are valid only for `STRICT` or `AGILE_REVIEWED`. `AGILE` does not use
+Review.
 
 ## Review-record branch
 
@@ -52,6 +55,12 @@ Immediately before merge, refresh live:
 - configured merge mode/method.
 
 Any changed head invalidates approval.
+
+In `AGILE_REVIEWED`, map only a critical issue from the shared delivery-mode
+definition to `blocker`. Major and minor counts are advisory and may accompany
+APPROVE. `REQUEST_CHANGES` without a blocker is invalid. On re-review, verify
+the enumerated blockers and new critical regressions introduced by their fix;
+do not reopen advisory scope.
 
 For `review-only`, deliver and apply `APPROVE` plus `READY` first. Review does
 not execute the merge. If a separately authorized merge owner later merges the

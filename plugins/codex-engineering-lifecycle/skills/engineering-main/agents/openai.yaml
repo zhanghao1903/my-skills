@@ -1,4 +1,4 @@
 interface:
   display_name: "Engineering Main"
-  short_description: "Design, implement, accept or release, and close features."
+  short_description: "Deliver features through their confirmed mode."
   default_prompt: "Use $engineering-main to continue the authorized engineering lifecycle for this feature."

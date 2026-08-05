@@ -1,4 +1,4 @@
 interface:
   display_name: "Engineering Requirements"
-  short_description: "Collect, confirm, and hand off feature requirements."
-  default_prompt: "Use $engineering-requirements to turn this feature request into a confirmed requirements handoff."
+  short_description: "Confirm requirements with an explicit delivery mode."
+  default_prompt: "Use $engineering-requirements to select AGILE, AGILE_REVIEWED, or STRICT and confirm this requirements handoff."

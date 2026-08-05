@@ -1,8 +1,8 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "type": "CodeReviewRequest",
   "workflowId": "123e4567-e89b-12d3-a456-426614174000",
-  "messageId": "9878acd51c2cad8ec682fc46eb5989bfac46195de2e06430dcf3744a99a4c137",
+  "messageId": "1b694574feb4a98e5f5fcfbee95fa1dcac6445b20bcaf0ebf833cd589d1c608b",
   "featureId": "sample-feature-0123456789ab",
   "repositoryKey": "example/project",
   "routing": {
@@ -12,6 +12,7 @@
   "cycle": 1,
   "createdAt": "2026-07-27T12:00:00Z",
   "body": {
+    "deliveryMode": "STRICT",
     "pullRequest": {
       "number": 7,
       "url": "https://github.com/example/project/pull/7",

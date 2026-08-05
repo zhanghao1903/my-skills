@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.2.0 - 2026-08-05
+
+### Added
+
+- Require every confirmed requirements snapshot to name exactly one immutable
+  `DeliveryMode`: `AGILE`, `AGILE_REVIEWED`, or `STRICT`.
+- Add mode-aware routed contract v2 while retaining read compatibility for
+  legacy strict v1 messages.
+- Add `queue-agile-development` for committed non-strict plan authority and
+  `record-agile-verification` for exact-head CI/core-journey and merge proof
+  without fabricating independent review results.
+- Add weak `AGILE_REVIEWED` code review in which only critical/blocker findings
+  authorize remediation and other findings remain advisory.
+
+### Fixed
+
+- Prevent plan review in non-strict modes, independent code review in AGILE,
+  and mode-mismatched requirements or review messages.
+- Prevent advisory AGILE_REVIEWED findings from creating remediation GoalRuns.
+- Migrate state v4 to v5 by assigning `STRICT` to legacy features, preserving
+  the only behavior available before delivery modes.
+- Store generic development and delivery authority IDs in new closure records
+  while continuing to validate legacy strict closures.
+
 ## 0.1.2 - 2026-07-31
 
 ### Added

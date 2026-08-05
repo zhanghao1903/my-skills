@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "type": "CodeReviewResult",
   "workflowId": "123e4567-e89b-12d3-a456-426614174000",
-  "messageId": "6ddd562de6b260ce7457f4bdbd255e99dcc15a63e33e98f5a731a4dcf377905c",
+  "messageId": "e956ae3d41620828b9854dbb0ac02f25f95c288c58441962ea44bcff8cd2035f",
   "featureId": "sample-feature-0123456789ab",
   "repositoryKey": "example/project",
   "routing": {
@@ -10,9 +10,9 @@
     "destinationTaskId": "task-main"
   },
   "cycle": 1,
-  "createdAt": "2026-07-27T12:00:00Z",
+  "createdAt": "2026-08-05T12:00:00Z",
   "body": {
-    "deliveryMode": "STRICT",
+    "deliveryMode": "AGILE_REVIEWED",
     "requestMessageId": "1b694574feb4a98e5f5fcfbee95fa1dcac6445b20bcaf0ebf833cd589d1c608b",
     "reviewedPullRequest": {
       "number": 7,
@@ -23,7 +23,7 @@
       "headSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     },
     "decision": "APPROVE",
-    "findings": {"blocker": 0, "major": 0, "minor": 0},
+    "findings": {"blocker": 0, "major": 2, "minor": 1},
     "report": {
       "branch": "codex/review-records/sample-feature-0123456789ab/code-1-bbbbbbbbbbbb",
       "path": "docs/reviews/code.md",
@@ -32,10 +32,10 @@
     },
     "checks": {
       "status": "PASSING",
-      "checkedAt": "2026-07-27T12:00:00Z",
+      "checkedAt": "2026-08-05T12:00:00Z",
       "detailsUrl": "https://github.com/example/project/actions/runs/1"
     },
     "merge": {"status": "READY"},
-    "summary": "Exact head is approved and ready for the configured merge owner."
+    "summary": "No critical issue; advisory findings remain recorded."
   }
 }
