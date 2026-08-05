@@ -1,7 +1,7 @@
 {
   "name": "idea-validation-workflow",
-  "version": "0.1.0",
-  "description": "A client-neutral workflow for safely capturing, clarifying, promoting, executing, and reviewing Ideas through an IdeaTrace API.",
+  "version": "0.2.0",
+  "description": "Securely initialize an IdeaTrace client, then capture, clarify, promote, execute, and review Ideas through its API.",
   "author": {
     "name": "zhanghao1903",
     "url": "https://github.com/zhanghao1903"
@@ -19,10 +19,11 @@
   "interface": {
     "displayName": "Idea Validation Workflow",
     "shortDescription": "Turn natural-language Ideas into verified API workflows.",
-    "longDescription": "Guide proposers and executors through Idea capture, bounded clarification, explicit promotion, execution facts, structured reports, idempotent recovery, role-oriented reads, and human-governed handoff without creating a second source of truth.",
+    "longDescription": "Create a non-secret, release-bound client connection profile from a secure bearer reference, then guide proposers and executors through Idea capture, bounded clarification, explicit promotion, execution facts, structured reports, idempotent recovery, role-oriented reads, and human-governed handoff without creating a second source of truth.",
     "developerName": "zhanghao1903",
     "category": "Productivity",
     "capabilities": [
+      "Secure client initialization",
       "Idea capture",
       "Clarification and promotion",
       "Execution facts",
@@ -31,8 +32,8 @@
     ],
     "websiteURL": "https://github.com/zhanghao1903/my-skills/tree/main/plugins/idea-validation-workflow",
     "defaultPrompt": [
+      "Use $idea-validation-init to configure this client without exposing credentials.",
       "Use $idea-validation-workflow to capture this Idea without promoting it.",
-      "Use $idea-validation-workflow to clarify this Idea from current public authority.",
       "Use $idea-validation-workflow to read this project and summarize the next allowed step."
     ],
     "brandColor": "#2F6B5F"

@@ -32,7 +32,7 @@ examples, or attribution files under `skills/`.
 | --- | --- |
 | [`codex-feature-lifecycle`](plugins/codex-feature-lifecycle/README.md) | Coordinate requirements confirmation, feature implementation, independent PR review, finding remediation, re-review, and merge through three dedicated Codex tasks. |
 | [`codex-engineering-lifecycle`](plugins/codex-engineering-lifecycle/README.md) | Run the heavier requirements, technical-plan, Goal-mode implementation, independent plan/code review, merge, release, and closure workflow through three dedicated Codex tasks. |
-| [`idea-validation-workflow`](plugins/idea-validation-workflow/README.md) | Guide proposers and executors through safe Idea capture, clarification, explicit promotion, execution facts, structured reports, idempotent recovery, and human-governed handoff. |
+| [`idea-validation-workflow`](plugins/idea-validation-workflow/README.md) | Securely initialize an IdeaTrace client profile, then guide proposers and executors through safe Idea capture, clarification, explicit promotion, execution facts, structured reports, idempotent recovery, and human-governed handoff. |
 
 ## Skill Index
 
@@ -84,10 +84,11 @@ Install the Idea Validation Workflow plugin:
 codex plugin add idea-validation-workflow@my-skills
 ```
 
-Start a new Codex task after installation, securely configure an
-IdeaTrace-compatible API base URL and AI bearer credential, then invoke
-`$idea-validation-workflow` with the proposer's natural-language Idea or the
-executor's project update.
+Start a new Codex task after installation. Invoke `$idea-validation-init` with a
+deployment handoff, secure AI-bearer reference, stable `clientId`, and readable
+`displayName`; do not paste the raw token. After the non-secret profile is
+validated, invoke `$idea-validation-workflow` with the proposer's
+natural-language Idea or the executor's project update.
 
 The same plugin is available in Claude Code through its native marketplace:
 
@@ -97,9 +98,10 @@ The same plugin is available in Claude Code through its native marketplace:
 /reload-plugins
 ```
 
-Invoke it as `/idea-validation-workflow:idea-validation-workflow`. Codex and
-Claude Code load the same Skill files; only their marketplace manifests and
-invocation syntax differ.
+Invoke `/idea-validation-workflow:idea-validation-init` first and then
+`/idea-validation-workflow:idea-validation-workflow`. Codex and Claude Code
+load the same Skill files; only their marketplace manifests and invocation
+syntax differ.
 
 ## Local Install
 

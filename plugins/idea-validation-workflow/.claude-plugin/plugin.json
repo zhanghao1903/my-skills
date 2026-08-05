@@ -1,8 +1,8 @@
 {
   "name": "idea-validation-workflow",
   "displayName": "Idea Validation Workflow",
-  "version": "0.1.0",
-  "description": "A client-neutral workflow for safely capturing, clarifying, promoting, executing, and reviewing Ideas through an IdeaTrace API.",
+  "version": "0.2.0",
+  "description": "Securely initialize an IdeaTrace client, then capture, clarify, promote, execute, and review Ideas through its API.",
   "author": {
     "name": "zhanghao1903",
     "url": "https://github.com/zhanghao1903"
