@@ -22,7 +22,7 @@ from typing import Any
 from urllib.parse import unquote, urlsplit
 
 SCHEMA_VERSION = 1
-STATE_SCHEMA_VERSION = 2
+STATE_SCHEMA_VERSION = 3
 ROLES = ("requirements", "main", "review")
 MERGE_MODES = ("review-only", "merge-on-approve")
 MERGE_METHODS = ("squash", "merge", "rebase")
@@ -35,6 +35,7 @@ STAGES = {
     "DEVELOPMENT_QUEUED",
     "DEVELOPMENT_ACTIVE",
     "DEVELOPMENT_BLOCKED",
+    "DEVELOPMENT_ABANDONED",
     "DEVELOPMENT_COMPLETE",
     "CODE_REVIEW_PENDING",
     "CODE_CHANGES_REQUESTED",
@@ -60,7 +61,7 @@ DISPATCH_STATUSES = {
     "accepted",
     "applied",
 }
-GOAL_STATUSES = {"PREPARED", "ACTIVE", "BLOCKED", "COMPLETE"}
+GOAL_STATUSES = {"PREPARED", "ACTIVE", "BLOCKED", "ABANDONED", "COMPLETE"}
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 FEATURE_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?-[0-9a-f]{12}$")
@@ -516,6 +517,57 @@ def validate_config(value: Any, repository: Mapping[str, Any]) -> dict[str, Any]
     return config
 
 
+def validate_goal_abandonment(
+    value: Any, field: str, goal_run_id: str
+) -> dict[str, Any]:
+    abandonment = exact_keys(
+        value,
+        field,
+        {
+            "abandonmentId",
+            "kind",
+            "reason",
+            "authorizationSourceThreadId",
+            "authorizationEvidenceDigest",
+            "supersededByFeatureId",
+            "abandonedAt",
+        },
+    )
+    require_digest(abandonment["abandonmentId"], f"{field}.abandonmentId")
+    if abandonment["kind"] != "SUPERSEDED":
+        raise WorkflowError("invalid_state", f"{field}.kind is unsupported")
+    reason = require_string(abandonment["reason"], f"{field}.reason", maximum=300)
+    source_thread_id = require_string(
+        abandonment["authorizationSourceThreadId"],
+        f"{field}.authorizationSourceThreadId",
+        maximum=200,
+    )
+    evidence_digest = require_digest(
+        abandonment["authorizationEvidenceDigest"],
+        f"{field}.authorizationEvidenceDigest",
+    )
+    superseding_feature_id = require_feature_id(
+        abandonment["supersededByFeatureId"],
+        f"{field}.supersededByFeatureId",
+    )
+    require_timestamp(abandonment["abandonedAt"], f"{field}.abandonedAt")
+    expected_id = digest(
+        {
+            "goalRunId": goal_run_id,
+            "kind": "SUPERSEDED",
+            "reason": reason,
+            "authorizationSourceThreadId": source_thread_id,
+            "authorizationEvidenceDigest": evidence_digest,
+            "supersededByFeatureId": superseding_feature_id,
+        }
+    )
+    if abandonment["abandonmentId"] != expected_id:
+        raise WorkflowError(
+            "invalid_state", f"{field}.abandonmentId does not match its authority"
+        )
+    return abandonment
+
+
 def validate_goal_run(value: Any, field: str) -> dict[str, Any]:
     run = exact_keys(
         value,
@@ -529,7 +581,7 @@ def validate_goal_run(value: Any, field: str) -> dict[str, Any]:
             "objectiveDigest",
             "status",
         },
-        {"startedAt", "completedAt", "blockedReason", "usage"},
+        {"startedAt", "completedAt", "blockedReason", "usage", "abandonment"},
     )
     require_digest(run["goalRunId"], f"{field}.goalRunId")
     if run["purpose"] not in {"INITIAL_IMPLEMENTATION", "CODE_REMEDIATION"}:
@@ -544,12 +596,30 @@ def validate_goal_run(value: Any, field: str) -> dict[str, Any]:
         require_timestamp(run["startedAt"], f"{field}.startedAt")
     if "completedAt" in run:
         require_timestamp(run["completedAt"], f"{field}.completedAt")
-    if run["status"] in {"ACTIVE", "BLOCKED", "COMPLETE"} and "startedAt" not in run:
+    if (
+        run["status"] in {"ACTIVE", "BLOCKED", "ABANDONED", "COMPLETE"}
+        and "startedAt" not in run
+    ):
         raise WorkflowError("invalid_state", f"{field}.startedAt is required")
     if run["status"] == "COMPLETE" and "completedAt" not in run:
         raise WorkflowError("invalid_state", f"{field}.completedAt is required")
-    if run["status"] == "BLOCKED" and "blockedReason" not in run:
+    if run["status"] in {"BLOCKED", "ABANDONED"} and "blockedReason" not in run:
         raise WorkflowError("invalid_state", f"{field}.blockedReason is required")
+    if run["status"] == "ABANDONED":
+        if "abandonment" not in run:
+            raise WorkflowError("invalid_state", f"{field}.abandonment is required")
+        if "completedAt" in run or "usage" in run:
+            raise WorkflowError(
+                "invalid_state",
+                f"{field} ABANDONED GoalRun cannot contain completion proof",
+            )
+        validate_goal_abandonment(
+            run["abandonment"], f"{field}.abandonment", run["goalRunId"]
+        )
+    elif "abandonment" in run:
+        raise WorkflowError(
+            "invalid_state", f"{field}.abandonment requires ABANDONED status"
+        )
     return run
 
 
@@ -919,6 +989,7 @@ def validate_feature_record(
         "DEVELOPMENT_QUEUED",
         "DEVELOPMENT_ACTIVE",
         "DEVELOPMENT_BLOCKED",
+        "DEVELOPMENT_ABANDONED",
         "DEVELOPMENT_COMPLETE",
         "CODE_REVIEW_PENDING",
         "CODE_CHANGES_REQUESTED",
@@ -1094,6 +1165,35 @@ def validate_state(value: Any, config: Mapping[str, Any]) -> dict[str, Any]:
             seen.add(run["goalRunId"])
             if run["status"] in {"ACTIVE", "BLOCKED"}:
                 occupied_runs.append((feature_id, run["goalRunId"]))
+    for feature_id, feature in features.items():
+        runs = feature.get("goalRuns", [])
+        abandoned_runs = [run for run in runs if run["status"] == "ABANDONED"]
+        if feature["stage"] == "DEVELOPMENT_ABANDONED":
+            if (
+                len(abandoned_runs) != 1
+                or not runs
+                or runs[-1]["status"] != "ABANDONED"
+            ):
+                raise WorkflowError(
+                    "invalid_state",
+                    "Abandoned feature must end with exactly one ABANDONED GoalRun",
+                )
+            superseding_feature_id = abandoned_runs[0]["abandonment"][
+                "supersededByFeatureId"
+            ]
+            if (
+                superseding_feature_id == feature_id
+                or superseding_feature_id not in features
+            ):
+                raise WorkflowError(
+                    "invalid_state",
+                    "ABANDONED GoalRun must reference another workflow feature",
+                )
+        elif abandoned_runs:
+            raise WorkflowError(
+                "invalid_state",
+                "ABANDONED GoalRun requires DEVELOPMENT_ABANDONED feature stage",
+            )
     queue = state["developmentQueue"]
     if not isinstance(queue, list) or len(queue) != len(set(queue)):
         raise WorkflowError(
@@ -1239,15 +1339,32 @@ def migrate_state_v1(value: Any) -> tuple[dict[str, Any], bool]:
             }
             initial_submission["submissionDigest"] = digest(initial_submission)
             release["submissions"] = [initial_submission, last_submission]
+    migrated["schemaVersion"] = 2
+    migrated["updatedAt"] = utc_now()
+    return migrated, True
+
+
+def migrate_state_v2(value: Any) -> tuple[dict[str, Any], bool]:
+    state = require_object(value, "state")
+    version = state.get("schemaVersion")
+    if not isinstance(version, int) or isinstance(version, bool) or version != 2:
+        return dict(state), False
+    migrated = require_object(json.loads(canonical_json(state)), "state")
     migrated["schemaVersion"] = STATE_SCHEMA_VERSION
     migrated["updatedAt"] = utc_now()
     return migrated, True
 
 
+def migrate_state(value: Any) -> tuple[dict[str, Any], bool]:
+    state, migrated_v1 = migrate_state_v1(value)
+    state, migrated_v2 = migrate_state_v2(state)
+    return state, migrated_v1 or migrated_v2
+
+
 def load_state_locked(
     paths: Mapping[str, Path], config: Mapping[str, Any]
 ) -> dict[str, Any]:
-    state, migrated = migrate_state_v1(load_json(paths["state"], "state"))
+    state, migrated = migrate_state(load_json(paths["state"], "state"))
     validated = validate_state(state, config)
     if migrated:
         atomic_write(paths["state"], validated)
@@ -2626,6 +2743,16 @@ def command_status(args: argparse.Namespace) -> dict[str, Any]:
                     "goalRunId": run["goalRunId"],
                     "purpose": run["purpose"],
                     "status": run["status"],
+                    **(
+                        {"blockedReason": run["blockedReason"]}
+                        if "blockedReason" in run
+                        else {}
+                    ),
+                    **(
+                        {"abandonment": run["abandonment"]}
+                        if "abandonment" in run
+                        else {}
+                    ),
                 }
                 for run in feature.get("goalRuns", [])
             ],
@@ -3316,6 +3443,107 @@ def command_goal_transition(args: argparse.Namespace, operation: str) -> dict[st
             touch(feature, "DEVELOPMENT_COMPLETE")
         save_state(paths, state, config)
     return {"ok": True, "goalRun": run, "stage": feature["stage"]}
+
+
+def abandonment_authority(args: argparse.Namespace, goal_run_id: str) -> dict[str, str]:
+    evidence = require_string(
+        args.authorization_evidence,
+        "authorizationEvidence",
+        maximum=4000,
+    )
+    return {
+        "goalRunId": goal_run_id,
+        "kind": "SUPERSEDED",
+        "reason": require_string(args.reason, "reason", maximum=300),
+        "authorizationSourceThreadId": require_string(
+            args.authorization_source_thread_id,
+            "authorizationSourceThreadId",
+            maximum=200,
+        ),
+        "authorizationEvidenceDigest": hashlib.sha256(
+            evidence.encode("utf-8")
+        ).hexdigest(),
+        "supersededByFeatureId": require_feature_id(
+            args.superseded_by_feature_id,
+            "supersededByFeatureId",
+        ),
+    }
+
+
+def command_abandon_development(args: argparse.Namespace) -> dict[str, Any]:
+    _, paths, config, _ = load_context(args.repo)
+    require_role(config, args.task_id, "main")
+    with locked(paths["lock"]):
+        state = validate_state(load_json(paths["state"], "state"), config)
+        feature = feature_for(state, args.feature_id)
+        goal_run_id = require_digest(args.goal_run_id, "goalRunId")
+        run = next(
+            (item for item in feature["goalRuns"] if item["goalRunId"] == goal_run_id),
+            None,
+        )
+        if not isinstance(run, dict):
+            raise WorkflowError("invalid_transition", "GoalRun does not exist")
+        authority = abandonment_authority(args, goal_run_id)
+        abandonment_id = digest(authority)
+        if run["status"] == "ABANDONED":
+            existing = require_object(run.get("abandonment"), "GoalRun.abandonment")
+            if existing.get("abandonmentId") != abandonment_id:
+                raise WorkflowError(
+                    "replay_conflict",
+                    "ABANDONED GoalRun has different abandonment authority",
+                )
+            return {
+                "ok": True,
+                "duplicate": True,
+                "goalRun": run,
+                "stage": feature["stage"],
+                "activeGoal": state["activeGoal"],
+            }
+        if run["status"] != "BLOCKED":
+            raise WorkflowError(
+                "invalid_transition", "Only BLOCKED GoalRun can be abandoned"
+            )
+        if state["activeGoal"] != {
+            "featureId": feature["featureId"],
+            "goalRunId": goal_run_id,
+        }:
+            raise WorkflowError(
+                "invalid_transition", "GoalRun is not the active workflow Goal"
+            )
+        superseding_feature_id = authority["supersededByFeatureId"]
+        if superseding_feature_id == feature["featureId"]:
+            raise WorkflowError("invalid_transition", "Feature cannot supersede itself")
+        superseding_feature = state["features"].get(superseding_feature_id)
+        if (
+            not isinstance(superseding_feature, dict)
+            or superseding_feature["stage"] != "DEVELOPMENT_QUEUED"
+            or superseding_feature_id not in state["developmentQueue"]
+        ):
+            raise WorkflowError(
+                "invalid_transition",
+                "Superseding feature must be present in DEVELOPMENT_QUEUED",
+            )
+        if "completedAt" in run or "usage" in run:
+            raise WorkflowError(
+                "invalid_state",
+                "BLOCKED GoalRun cannot be abandoned with completion proof",
+            )
+        run["status"] = "ABANDONED"
+        run["abandonment"] = {
+            **{key: value for key, value in authority.items() if key != "goalRunId"},
+            "abandonmentId": abandonment_id,
+            "abandonedAt": utc_now(),
+        }
+        state["activeGoal"] = None
+        touch(feature, "DEVELOPMENT_ABANDONED")
+        save_state(paths, state, config)
+    return {
+        "ok": True,
+        "duplicate": False,
+        "goalRun": run,
+        "stage": feature["stage"],
+        "activeGoal": state["activeGoal"],
+    }
 
 
 def command_prepare_code_review(args: argparse.Namespace) -> dict[str, Any]:
@@ -4430,6 +4658,17 @@ def build_parser() -> argparse.ArgumentParser:
             item.add_argument("--tokens-used", type=int)
             item.add_argument("--time-used-seconds", type=int)
 
+    abandon = add_repo(
+        "abandon-development",
+        "Abandon an exact BLOCKED GoalRun under explicit user authority",
+    )
+    abandon.add_argument("--feature-id", required=True)
+    abandon.add_argument("--goal-run-id", required=True)
+    abandon.add_argument("--reason", required=True)
+    abandon.add_argument("--authorization-source-thread-id", required=True)
+    abandon.add_argument("--authorization-evidence", required=True)
+    abandon.add_argument("--superseded-by-feature-id", required=True)
+
     code = add_repo("prepare-code-review", "Prepare exact-head code review")
     code.add_argument("--feature-id", required=True)
     code.add_argument("--pr-number", type=int, required=True)
@@ -4517,6 +4756,7 @@ def main() -> int:
         "block-development": lambda item: command_goal_transition(item, "block"),
         "resume-development": lambda item: command_goal_transition(item, "resume"),
         "complete-development": lambda item: command_goal_transition(item, "complete"),
+        "abandon-development": command_abandon_development,
         "prepare-code-review": command_prepare_code_review,
         "accept-code-review": command_accept_code_review,
         "prepare-code-result": command_prepare_code_result,

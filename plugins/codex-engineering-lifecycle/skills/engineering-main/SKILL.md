@@ -85,6 +85,15 @@ run complete only after `get_goal` proves genuine completion and no required
 work remains. Record genuine blocked status only under platform blocked rules.
 A completed run is immutable and is never reopened.
 
+If the user explicitly revokes the exact blocked objective and authorizes a
+queued feature to supersede it, do not resume or mark the old run complete.
+Use `abandon-development` with the exact GoalRun ID, reason, authorization
+source task ID, authorization evidence, and superseding feature ID. This is
+valid only from `BLOCKED`; it records terminal `ABANDONED` authority while
+preserving the blocked reason and prior history. Verify `activeGoal` is null
+and the replacement remains `DEVELOPMENT_QUEUED` before creating its Goal.
+Never infer or self-authorize abandonment.
+
 ## Dispatch code review
 
 Prepare the exact current PR snapshot:

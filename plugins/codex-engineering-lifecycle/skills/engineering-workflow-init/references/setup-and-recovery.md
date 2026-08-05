@@ -67,6 +67,10 @@ readiness remains false until all three acknowledgements are recorded.
 - missing task: prove it is unavailable, then ask before replacing it.
 - corrupt state: preserve the files, report the validator error, and restore
   from a known backup or reconstruct through an explicit migration.
+- user-revoked blocked Goal: require exact user authorization and a confirmed
+  queued superseding feature, then use the packaged `abandon-development`
+  migration. Never hand-edit `activeGoal`, delete the run, or report it
+  `COMPLETE`.
 
 Repeated Init is idempotent only when repository identity, task IDs, and policy
 match.
