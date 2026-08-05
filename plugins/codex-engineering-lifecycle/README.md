@@ -6,8 +6,8 @@ with three durable Codex tasks:
 - **Requirements** turns natural-language requests into a confirmed, committed
   requirements snapshot.
 - **Engineering Main** writes the technical plan, runs serialized Goal-mode
-  implementation and remediation, prepares the PR, publishes an explicitly
-  authorized release, and closes the feature.
+  implementation and remediation, prepares the PR, records an explicitly
+  authorized release or no-publish acceptance, and closes the feature.
 - **Engineering Review** independently reviews technical plans and exact PR
   heads, writes immutable review records, and merges only under the configured
   policy.
@@ -26,8 +26,9 @@ correct lifecycle gates.
   the corresponding lifecycle actions.
 - Explicit user authorization for Goal mode during Init.
 
-Init does not authorize merging or releasing. Merge policy is selected during
-Init, and every release requires a new exact per-release authorization.
+Init does not authorize merging, releasing, or no-publish acceptance. Merge
+policy is selected during Init, and every delivery disposition requires new
+exact user authorization.
 
 ## Install from GitHub
 
@@ -103,8 +104,8 @@ Natural-language request
   → exact-head code review and report
   → findings remediation in a new GoalRun, when needed
   → policy-gated merge
-  → exact release proposal and user authorization
-  → GitHub Release and/or PyPI proof
+  → exact release proposal or no-publish rationale and user authorization
+  → GitHub Release/PyPI proof or acceptance-only authority
   → feature closure
 ```
 
@@ -130,7 +131,7 @@ configured gate passes.
 
 Main presents the exact version, tag, merge commit, target types, artifact
 names, and SHA-256 digests. The user must authorize that exact proposal.
-Supported targets in v0.1.1 are:
+Supported publication targets in v0.1.2 are:
 
 - GitHub Release for the bound repository;
 - PyPI or TestPyPI.
@@ -150,6 +151,15 @@ targets cannot change replay authority.
 State validation also rejects merge, release, or closure proof that belongs to
 a later stage than the feature currently declares.
 
+When confirmed requirements explicitly exclude tags, artifacts, GitHub
+Releases, and package publication, Main may instead use
+`record-no-publish-acceptance` after explicit user authorization. The command
+binds `ACCEPTED_NO_PUBLISH` to the exact merge commit, authorizer, source
+task/thread, reason, and authorization-evidence digest. It stores no raw
+evidence, is idempotent for an identical replay, rejects conflicting replay,
+and closes with an acceptance ID plus an empty release-target list. It cannot
+replace a failed or merely inconvenient publication.
+
 ## Update
 
 Refresh the Git snapshot, reinstall the plugin, and use a new task:
@@ -160,10 +170,11 @@ codex plugin add codex-engineering-lifecycle@my-skills
 ```
 
 Local state schema v1 is migrated under the state lock by reconstructing its
-deterministic release submission ledger, and schema v2 is then migrated
-without semantic changes to v3. State v3 adds authorized Goal abandonment and
-is atomically persisted before use. It is validated before every mutation;
-incompatible future state is rejected rather than silently downgraded.
+deterministic release submission ledger; v2 and v3 are then migrated without
+semantic changes to v4. State v3 adds authorized Goal abandonment, while v4
+adds formal acceptance-only/no-publish authority. State is atomically
+persisted before use and validated before every mutation; incompatible future
+state is rejected rather than silently downgraded.
 
 ## Uninstall
 

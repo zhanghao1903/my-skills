@@ -1,6 +1,6 @@
 ---
 name: engineering-main
-description: Run the Engineering Main role of an initialized Codex Engineering Lifecycle workflow. Use when this task is the configured Main task and receives a validated RequirementsHandoff or review result, resumes plan remediation, starts or continues an authorized GoalRun, implements and verifies a feature, prepares or updates a PR, remediates code-review findings, records merge proof, prepares an exact release authorization, publishes an authorized release, or closes a released feature. Do not use for requirements intake, independent review, self-approval, or direct merge.
+description: Run the Engineering Main role of an initialized Codex Engineering Lifecycle workflow. Use when this task is the configured Main task and receives a validated RequirementsHandoff or review result, resumes plan remediation, starts or continues an authorized GoalRun, implements and verifies a feature, prepares or updates a PR, remediates code-review findings, records merge proof, records explicit no-publish acceptance, prepares an exact release authorization, publishes an authorized release, or closes an accepted feature. Do not use for requirements intake, independent review, self-approval, or direct merge.
 ---
 
 # Engineering Main
@@ -109,7 +109,7 @@ stale approval.
 
 Main never approves or merges its own work.
 
-## Accept merge and release
+## Accept merge and delivery disposition
 
 Accept only a CodeReviewResult whose reviewed head equals the request. A
 `MERGED` result must include passing-check evidence and exact merge proof.
@@ -117,7 +117,22 @@ With review-only policy, first accept `APPROVE`/`READY`, wait for a separately
 authorized merge owner, and then accept Review's observed `MERGED` proof for
 that same request. Main never performs or self-records that merge.
 
-After merge:
+After merge, reconcile the confirmed scope before proposing publication.
+
+If the confirmed scope explicitly excludes tags, artifacts, GitHub Releases,
+and package publication:
+
+1. present the exact merge commit, no-publish reason, and acceptance authority;
+2. require explicit user authorization for acceptance-only/no-publish;
+3. call `record-no-publish-acceptance` with the exact merge commit,
+   authorization source task/thread, evidence, authorizer, and reason;
+4. never create a release target, tag, package, or synthetic artifact.
+
+An identical acceptance replay is safe. A different authority is a conflict.
+Do not use no-publish acceptance merely because publishing is inconvenient or
+failed; it must follow the confirmed scope and explicit user authority.
+
+If publication is in scope:
 
 1. use `$feature-lifecycle` and `$product-workflow-gate` to prepare version,
    tag, artifact names/digests, GitHub Release and/or PyPI targets, notes, and
@@ -134,10 +149,11 @@ failed target unless the user authorizes a new proposal.
 ## Close
 
 Call `close-feature` only after every authorized target is PUBLISHED with
-matching artifact digests. The closure record must link requirements, plan
-review, code review, merge commit, every release target, scenarios solved, and
-follow-ups.
+matching artifact digests, or after a formal `ACCEPTED_NO_PUBLISH` transition.
+The closure record must link requirements, plan review, code review, merge
+commit, the exact release result or no-publish acceptance ID, scenarios solved,
+and follow-ups.
 
-Report the final closure ID and release links to Requirements and Review for
-traceability. Do not archive tasks, delete branches/state, or remove review
+Report the final closure ID and any release links to Requirements and Review
+for traceability. Do not archive tasks, delete branches/state, or remove review
 records without separate explicit authorization.

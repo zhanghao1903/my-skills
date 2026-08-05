@@ -14,10 +14,11 @@
 | `DEVELOPMENT_COMPLETE` | Prepare exact-head code review |
 | `CODE_CHANGES_REQUESTED` | Queue a new remediation GoalRun |
 | `MERGE_READY` | Under review-only, wait for an external merge owner and Review's observed proof |
-| `MERGED` | Prepare exact release proposal |
-| `RELEASE_AWAITING_AUTHORIZATION` | Wait for exact user authorization |
+| `MERGED` | Reconcile confirmed publication scope |
+| `RELEASE_AWAITING_AUTHORIZATION` | Wait for exact release or no-publish authorization |
 | `RELEASE_AUTHORIZED` / `RELEASE_FAILED` | Publish or retry authorized targets |
 | `RELEASED` | Validate and record closure |
+| `ACCEPTED_NO_PUBLISH` | Validate and record acceptance-only closure |
 
 ## Plan snapshot
 
@@ -95,6 +96,20 @@ cumulative result is also safe; any other successful subset is a conflict.
 The runtime appends each non-duplicate result to ordered submission history;
 the history must reconstruct cumulative proof and its final entry must equal
 `lastSubmission`.
+
+## Acceptance-only / no-publish
+
+Use `record-no-publish-acceptance` only when confirmed requirements explicitly
+exclude every supported publication target and the user authorizes the exact
+merged feature disposition. Bind the record to the authoritative merge commit,
+authorizer, source task/thread, reason, and SHA-256 evidence digest. The helper
+stores no raw authorization evidence.
+
+The transition is Main-only and valid only from
+`RELEASE_AWAITING_AUTHORIZATION`. Identical replay returns the durable record
+without writing state; conflicting replay fails. It records
+`ACCEPTED_NO_PUBLISH`, never `RELEASED`, and closure carries the acceptance ID
+with an empty release-target list.
 
 ## External proof
 

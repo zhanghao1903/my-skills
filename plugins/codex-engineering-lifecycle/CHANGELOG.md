@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.1.2 - 2026-07-31
+
+### Added
+
+- Add a Main-only `record-no-publish-acceptance` transition for merged features
+  whose confirmed scope explicitly excludes every publication target.
+- Record terminal `ACCEPTED_NO_PUBLISH` authority bound to the exact merge
+  commit, authorizer, source task/thread, reason, evidence digest, timestamp,
+  and deterministic acceptance ID.
+- Allow auditable closure through either successful publication or formal
+  no-publish acceptance, while keeping the two authority paths mutually
+  exclusive.
+
+### Fixed
+
+- Avoid fabricating tags, artifacts, GitHub Releases, or PyPI targets merely to
+  close a documentation or independently accepted feature.
+- Make identical no-publish authorization replay idempotent and reject
+  conflicting authority, wrong role, wrong stage, and wrong merge commit.
+- Migrate workflow state v3 to v4 atomically without changing prior feature,
+  GoalRun, review, release, or closure history.
+
 ## 0.1.1 - 2026-07-30
 
 ### Added

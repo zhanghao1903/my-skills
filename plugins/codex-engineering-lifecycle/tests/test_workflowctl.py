@@ -360,11 +360,11 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
         self.assertEqual(recovered["workflowId"], initialized["workflowId"])
         self.assertEqual(recovered["tasks"], self.tasks)
 
-    def test_state_v2_migrates_atomically_to_v3_without_semantic_change(self) -> None:
+    def test_state_v2_migrates_atomically_to_v4_without_semantic_change(self) -> None:
         initialized = self.initialize()
         state_path = Path(initialized["stateRoot"]) / "state.json"
         state_v2 = json.loads(state_path.read_bytes())
-        self.assertEqual(state_v2["schemaVersion"], 3)
+        self.assertEqual(state_v2["schemaVersion"], 4)
         state_v2["schemaVersion"] = 2
         state_path.write_text(json.dumps(state_v2), encoding="utf-8")
         expected = copy.deepcopy(state_v2)
@@ -374,7 +374,27 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
         status = self.command("status")
         self.assertTrue(status["initialized"])
         migrated = json.loads(state_path.read_bytes())
-        self.assertEqual(migrated["schemaVersion"], 3)
+        self.assertEqual(migrated["schemaVersion"], 4)
+        actual = copy.deepcopy(migrated)
+        actual.pop("schemaVersion")
+        actual.pop("updatedAt")
+        self.assertEqual(actual, expected)
+
+    def test_state_v3_migrates_atomically_to_v4_without_semantic_change(self) -> None:
+        initialized = self.initialize()
+        state_path = Path(initialized["stateRoot"]) / "state.json"
+        state_v3 = json.loads(state_path.read_bytes())
+        self.assertEqual(state_v3["schemaVersion"], 4)
+        state_v3["schemaVersion"] = 3
+        state_path.write_text(json.dumps(state_v3), encoding="utf-8")
+        expected = copy.deepcopy(state_v3)
+        expected.pop("schemaVersion")
+        expected.pop("updatedAt")
+
+        status = self.command("status")
+        self.assertTrue(status["initialized"])
+        migrated = json.loads(state_path.read_bytes())
+        self.assertEqual(migrated["schemaVersion"], 4)
         actual = copy.deepcopy(migrated)
         actual.pop("schemaVersion")
         actual.pop("updatedAt")
@@ -1386,6 +1406,143 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
         )
         self.assertEqual(applied_code["stage"], "RELEASE_AWAITING_AUTHORIZATION")
 
+        awaiting_release_state = state_path.read_bytes()
+        acceptance_reason = (
+            "The confirmed scope requires formal acceptance without a tag, "
+            "artifact publication, GitHub Release, or PyPI upload."
+        )
+        acceptance_evidence = (
+            "The user explicitly authorized the exact acceptance-only/no-publish "
+            "transition for this merged feature."
+        )
+        acceptance_args = (
+            "--feature-id",
+            self.feature_id,
+            "--merge-commit-sha",
+            head_sha,
+            "--reason",
+            acceptance_reason,
+            "--authorized-by",
+            "test-user",
+            "--authorization-source-thread-id",
+            "task-main-user-authorization",
+            "--authorization-evidence",
+            acceptance_evidence,
+        )
+        wrong_role = self.command(
+            "record-no-publish-acceptance",
+            "--task-id",
+            self.tasks["requirements"],
+            *acceptance_args,
+            expect=2,
+        )
+        self.assertEqual(wrong_role["error"]["kind"], "task_role_mismatch")
+        wrong_sha_args = list(acceptance_args)
+        wrong_sha_args[3] = "f" * 40
+        wrong_sha = self.command(
+            "record-no-publish-acceptance",
+            "--task-id",
+            self.tasks["main"],
+            *wrong_sha_args,
+            expect=2,
+        )
+        self.assertEqual(wrong_sha["error"]["kind"], "snapshot_mismatch")
+
+        accepted = self.command(
+            "record-no-publish-acceptance",
+            "--task-id",
+            self.tasks["main"],
+            *acceptance_args,
+        )
+        self.assertFalse(accepted["duplicate"])
+        self.assertEqual(accepted["stage"], "ACCEPTED_NO_PUBLISH")
+        acceptance = accepted["acceptance"]
+        expected_authority = {
+            "kind": "ACCEPTANCE_ONLY",
+            "publication": "NO_PUBLISH",
+            "workflowId": init["workflowId"],
+            "featureId": self.feature_id,
+            "mergeCommitSha": head_sha,
+            "reason": acceptance_reason,
+            "authorizedBy": "test-user",
+            "authorizationSourceThreadId": "task-main-user-authorization",
+            "authorizationEvidenceDigest": hashlib.sha256(
+                acceptance_evidence.encode("utf-8")
+            ).hexdigest(),
+        }
+        self.assertEqual(
+            acceptance["acceptanceId"], WORKFLOW_MODULE.digest(expected_authority)
+        )
+        self.assertNotIn(
+            acceptance_evidence, state_path.read_text(encoding="utf-8")
+        )
+
+        accepted_state = state_path.read_bytes()
+        duplicate_acceptance = self.command(
+            "record-no-publish-acceptance",
+            "--task-id",
+            self.tasks["main"],
+            *acceptance_args,
+        )
+        self.assertTrue(duplicate_acceptance["duplicate"])
+        self.assertEqual(state_path.read_bytes(), accepted_state)
+
+        conflicting_args = list(acceptance_args)
+        conflicting_args[5] = "A conflicting no-publish reason."
+        conflicting_acceptance = self.command(
+            "record-no-publish-acceptance",
+            "--task-id",
+            self.tasks["main"],
+            *conflicting_args,
+            expect=2,
+        )
+        self.assertEqual(
+            conflicting_acceptance["error"]["kind"], "replay_conflict"
+        )
+        self.assertEqual(state_path.read_bytes(), accepted_state)
+
+        accepted_closure = self.command(
+            "close-feature",
+            "--task-id",
+            self.tasks["main"],
+            "--feature-id",
+            self.feature_id,
+            "--scenario",
+            "The merged feature is formally accepted without publication.",
+            "--follow-up",
+            "Begin the next independently accepted feature.",
+        )
+        self.assertEqual(accepted_closure["stage"], "CLOSED")
+        self.assertEqual(
+            accepted_closure["closure"]["disposition"],
+            "ACCEPTED_NO_PUBLISH",
+        )
+        self.assertEqual(
+            accepted_closure["closure"]["acceptanceId"],
+            acceptance["acceptanceId"],
+        )
+        self.assertEqual(accepted_closure["closure"]["releaseTargets"], [])
+        self.assertNotIn("releaseResultId", accepted_closure["closure"])
+        closed_no_publish_state = state_path.read_bytes()
+        duplicate_closure = self.command(
+            "close-feature",
+            "--task-id",
+            self.tasks["main"],
+            "--feature-id",
+            self.feature_id,
+            "--scenario",
+            "Ignored on idempotent replay.",
+        )
+        self.assertTrue(duplicate_closure["duplicate"])
+        self.assertEqual(state_path.read_bytes(), closed_no_publish_state)
+
+        state_path.write_bytes(awaiting_release_state)
+        restored = self.command("status", "--task-id", self.tasks["main"])
+        self.assertEqual(
+            restored["features"][self.feature_id]["stage"],
+            "RELEASE_AWAITING_AUTHORIZATION",
+        )
+
         authorization_draft = {
             "schemaVersion": 1,
             "workflowId": init["workflowId"],
@@ -1584,7 +1741,7 @@ class WorkflowCtlIntegrationTest(unittest.TestCase):
             migrated_status["features"][self.feature_id]["stage"], "RELEASED"
         )
         migrated_state = json.loads(state_path.read_bytes())
-        self.assertEqual(migrated_state["schemaVersion"], 3)
+        self.assertEqual(migrated_state["schemaVersion"], 4)
         self.assertEqual(
             len(migrated_state["features"][self.feature_id]["release"]["submissions"]),
             2,
