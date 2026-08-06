@@ -1,7 +1,7 @@
 {
   "name": "idea-validation-workflow",
   "displayName": "Idea Validation Workflow",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Securely initialize an IdeaTrace client, then capture, clarify, promote, execute, and review Ideas through its API.",
   "author": {
     "name": "zhanghao1903",

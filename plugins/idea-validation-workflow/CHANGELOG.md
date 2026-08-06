@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1 - 2026-08-06
+
+- Advance the pinned IdeaTrace compatibility baseline to independently reviewed
+  head `ef4485b6d25c` and canonical squash merge `0c4c30410e9a`.
+- Pin contract guidance to the OpenAPI snapshot whose production-equivalent
+  runtime excludes SPA shell routes and exactly matches the frozen document.
+- Preserve the 0.2.0 secure initialization, dual attribution, Codex/Claude
+  compatibility, and strict human-control credential boundary.
+
 ## 0.2.0 - 2026-08-06
 
 - Add `idea-validation-init` for a secure, non-secret, release-bound client

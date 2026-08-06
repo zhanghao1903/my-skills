@@ -111,11 +111,13 @@ that profile before any AI write.
 
 ## Compatibility baseline
 
-Version `0.2.0` supports Codex, Claude Code, and compatible Markdown-Skill
+Version `0.2.1` supports Codex, Claude Code, and compatible Markdown-Skill
 clients. Its initialization/profile contract and workflow updates are packaged
 from reviewed IdeaTrace head
-`c637f2140b54f6d56318841e30cad1881e4eee09`, squash-merged as
-`31b5e42fa0c25fbc41d6a02f16abb64832861312`. The plugin ships the canonical
+`ef4485b6d25c9f799c9422d45b96b6e38c78c3e1`, squash-merged as
+`0c4c30410e9a2cc2c848047214654ab9df2585a2`. That snapshot restores complete
+production-equivalent OpenAPI parity by excluding SPA shell routes from
+Swagger without changing browser routing. The plugin ships the canonical
 profile and structured-report schemas while treating the configured server's
 live compatible OpenAPI as runtime authority.
 
